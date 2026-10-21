@@ -1,0 +1,1135 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Блюда</title>
+    <link rel="stylesheet" href="../styles/styles.css">
+    <link rel="stylesheet" href="../styles/normal.css">
+</head>
+<body id="dishes_page">
+    <input type="checkbox" id="menuToggle" class="checkbox">
+
+    <div id="div_logo">
+        <img src="../png/logo_with_text.png" alt="">
+    </div>
+    
+    <header>
+        <a href="./dishes.html" data-route="dishes"><img id="dishes_nav_icon" src="../png/eat.png" alt=""></a>
+        <a href="./basket.html" data-route="basket"><img id="basket_nav_icon" src="../png/korzina.png" alt=""></a>
+        <label for="menuToggle">
+            <img id="settings" src="../png/settings.png" alt="Настройки">
+        </label>
+    </header>
+
+    <ul id="menu_dishes"></ul>
+
+    <h1 id="title_chapter">Первое</h1>
+
+    <main id="route_host">
+        <section id="route_dishes" class="route-screen is-active">
+            <div id="dishes_swipe_container">
+                <div id="dishes_swipe_content"></div>
+            </div>
+        </section>
+
+        <section id="route_basket" class="route-screen">
+            <div id="total_price_section" style="text-align: center; margin: 20px; display: none;">
+                <strong>Общая стоимость заказа: <span id="total_order_price">0</span> руб.</strong>
+            </div>
+
+            <div id="basket_swipe_container">
+                <div id="qrcode_container">
+                    <div id="qrcode_wrapper">
+                        <div id="qrcode"></div>
+                        <div id="client_id_display"></div>
+                    </div>
+                </div>
+
+                <div id="basket_swipe_content">
+                    <div id="dishes_page_basket" class="basket-page"></div>
+                    <div id="dishes_page_order" class="basket-page"></div>
+                </div>
+            </div>
+            
+            <div id="order_container"></div>
+
+            <div class="wrapper_for_btn">
+                <button class="basic_button" id="remove_order">Отменить заказ</button>
+                <button class="basic_button update_bg" id="set_order">Оформить заказ</button>
+            </div>
+        </section>
+    </main>
+
+    <div id="error_message" class="error_message" style="display: none;">
+        <p class="error_message_text"></p>
+    </div>
+
+    <footer>
+        <p style="visibility: hidden;">Здесь может быть какая-то</p>
+    </footer>
+
+<script src="https://cdn.jsdelivr.net/npm/davidshimjs-qrcodejs@0.0.2/qrcode.min.js"></script>
+<script type="module" defer>
+    import { updating_dish_card } from '../js/meal_cards.js';
+    import {
+        show_message,
+        authRequired,
+        activateButton,
+        creating_application_elements,
+        getCookie,
+        updateOrderTotalPrice,
+        parseJwtModern
+    } from '../js/export.js';
+
+    const ROUTES = {
+        DISHES: 'dishes',
+        BASKET: 'basket'
+    };
+
+    let currentRoute = location.pathname.includes('basket') ? ROUTES.BASKET : ROUTES.DISHES;
+
+    const dishesNavLink = document.querySelector('a[data-route="dishes"]');
+    const basketNavLink = document.querySelector('a[data-route="basket"]');
+    const dishesNavIcon = document.getElementById('dishes_nav_icon');
+    const basketNavIcon = document.getElementById('basket_nav_icon');
+
+    const routeDishes = document.getElementById('route_dishes');
+    const routeBasket = document.getElementById('route_basket');
+    const menuDishes = document.getElementById('menu_dishes');
+    const titleChapter = document.getElementById('title_chapter');
+
+    const dishesSwipeContainer = document.getElementById('dishes_swipe_container');
+    const dishesSwipeContent = document.getElementById('dishes_swipe_content');
+
+    const basketSwipeContainer = document.getElementById('basket_swipe_container');
+    const basketSwipeContent = document.getElementById('basket_swipe_content');
+    const dishesPageBasket = document.getElementById('dishes_page_basket');
+    const dishesPageOrder = document.getElementById('dishes_page_order');
+    const qrcode = document.getElementById('qrcode');
+    const qrcodeContainer = document.getElementById('qrcode_container');
+    const removeOrderBtn = document.getElementById('remove_order');
+    const setOrderBtn = document.getElementById('set_order');
+
+    let menuButtons = [];
+
+    let dishesCurrentPage = 0;
+    let dishesStartX = 0;
+    let dishesStartY = 0;
+    let totalDishes = {};
+    let totalCategories = [];
+    let dishesLoaded = false;
+
+    let basketCurrentPage = 0;
+    let basketStartX = 0;
+    let basketStartY = 0;
+    let basketLoaded = false;
+    let orderLoaded = false;
+    let basketLoading = false;
+    let orderLoading = false;
+
+    let currentStudentId = null;
+    let qrCodeInstance = null;
+    let isQrExpanded = false;
+    let basketUpdateTimeout;
+
+    function syncHeaderIcons(route) {
+        dishesNavIcon.removeAttribute('id');
+        basketNavIcon.removeAttribute('id');
+
+        dishesNavIcon.id = route === ROUTES.DISHES ? 'dishes_img' : 'dishes_nav_icon';
+        basketNavIcon.id = route === ROUTES.BASKET ? 'basket_img' : 'basket_nav_icon';
+
+        document.body.id = route === ROUTES.BASKET ? 'order' : 'dishes_page';
+        document.title = route === ROUTES.BASKET ? 'Корзина и заказ' : 'Блюда';
+    }
+
+    function animateRoute(routeElement) {
+        routeElement.classList.remove('route-enter');
+        void routeElement.offsetWidth;
+        routeElement.classList.add('route-enter');
+    }
+
+    function renderMenu(items, onClick) {
+        menuDishes.innerHTML = items
+            .map((item, index) => `<li><button data-index="${index}" id="${item.id}">${item.label}</button></li>`)
+            .join('');
+
+        menuButtons = Array.from(menuDishes.querySelectorAll('button'));
+        menuButtons.forEach((button, index) => {
+            button.addEventListener('click', () => onClick(index));
+        });
+    }
+
+    function animateCards(container) {
+        const cards = container.querySelectorAll('.card_dish');
+        cards.forEach((card, index) => {
+            card.classList.add('card-appear');
+            card.style.animationDelay = `${Math.min(index * 35, 210)}ms`;
+        });
+    }
+
+    function createCenteredMessage(text) {
+        const wrapper = document.createElement('div');
+        wrapper.innerHTML = `
+            <div style="
+                text-align: center;
+                margin: 30px auto 20px auto;
+                color: #777;
+                font-size: 1.1rem;
+                width: 90%;
+            ">
+                ${text}
+            </div>
+        `;
+        return wrapper;
+    }
+
+    function createSubTitle(text) {
+        const wrapper = document.createElement('div');
+        wrapper.innerHTML = `
+            <div style="
+                width: 90vw;
+                margin: 5px auto 0 auto;
+                padding: 10px 15px;
+                text-align: center;
+                background: #ececec;
+                color: #666;
+                border-radius: 10px;
+                font-weight: 600;
+            ">
+                ${text}
+            </div>
+        `;
+        return wrapper;
+    }
+
+    function isDishAvailable(dish) {
+        const quantity = Number(dish?.quantity ?? 0);
+
+        const explicitlyUnavailable =
+            dish?.is_available === false ||
+            dish?.available === false ||
+            dish?.is_active === false;
+
+        return !explicitlyUnavailable && quantity > 0;
+    }
+
+    function sortDishesByAvailability(dishes) {
+        return [...dishes].sort((a, b) => {
+            const aAvailable = isDishAvailable(a) ? 1 : 0;
+            const bAvailable = isDishAvailable(b) ? 1 : 0;
+
+            if (bAvailable !== aAvailable) {
+                return bAvailable - aAvailable;
+            }
+
+            return 0;
+        });
+    }
+
+    function styleUnavailableCards(container, dishes) {
+        const cards = container.querySelectorAll('.card_dish');
+
+        cards.forEach((card, index) => {
+            const dish = dishes[index];
+            if (!dish || isDishAvailable(dish)) return;
+
+            card.style.filter = 'grayscale(1)';
+            card.style.opacity = '0.7';
+
+            const info = card.querySelector('.card_dish_info');
+            if (info) {
+                info.style.backgroundColor = '#8f8f8f';
+            }
+
+            const addBtn = card.querySelector('.add_basket');
+            if (addBtn) {
+                addBtn.style.display = 'none';
+            }
+
+            const counter = card.querySelector('.counter_dishes');
+            if (counter) {
+                counter.style.display = 'none';
+            }
+
+            card.style.pointerEvents = 'none';
+        });
+    }
+
+    async function loadDishes() {
+        try {
+            const response = await fetch('/api/dishes/dishes_tomorrow', {
+                method: 'GET',
+                credentials: 'include',
+                cache: 'no-store'
+            });
+
+            if (!response.ok) {
+                throw new Error('HTTP error!');
+            }
+
+            const data = await response.json();
+            return data.dishes || [];
+        } catch (error) {
+            console.error('Ошибка при загрузке блюд:', error);
+            show_message('Ошибка при загрузке блюд', '-');
+            return [];
+        }
+    }
+
+    async function distributionDishes() {
+        try {
+            const dishes = await loadDishes();
+
+            totalDishes = {};
+            totalCategories = [];
+
+            dishes.forEach(dish => {
+                if (totalCategories.indexOf(dish.category) === -1) {
+                    totalCategories.push(dish.category);
+                }
+
+                (totalDishes[dish.category] ??= []).push(dish);
+            });
+
+            totalCategories.forEach(category => {
+                totalDishes[category] = sortDishesByAvailability(totalDishes[category] || []);
+            });
+
+            dishesLoaded = true;
+        } catch (error) {
+            show_message('Ошибка распределения позиций', '-');
+            console.error('Ошибка распределения позиций:', error);
+        }
+    }
+
+    function renderDishesMenu() {
+        renderMenu(
+            totalCategories.map(category => ({ id: category, label: category })),
+            async (pageIndex) => {
+                const direction =
+                    pageIndex > dishesCurrentPage ? 'left' :
+                    pageIndex < dishesCurrentPage ? 'right' :
+                    'none';
+
+                await refreshAndShowDishPage(pageIndex, direction);
+            }
+        );
+    }
+
+    async function refreshAndShowDishPage(pageIndex = dishesCurrentPage, direction = 'none') {
+        const categoryToOpen = totalCategories[pageIndex] || totalCategories[dishesCurrentPage];
+
+        await distributionDishes();
+        renderDishesMenu();
+
+        if (totalCategories.length === 0) {
+            titleChapter.textContent = 'Блюда';
+            dishesCurrentPage = 0;
+            dishesSwipeContent.innerHTML = `
+                <div class="dishes-page">
+                    <div style="text-align: center; margin: 30px auto 20px auto; color: #777; font-size: 1.1rem; width: 90%;">
+                        Товаров не осталось в наличии
+                    </div>
+                </div>
+            `;
+            return;
+        }
+
+        const refreshedIndex = totalCategories.indexOf(categoryToOpen);
+        const safeIndex = refreshedIndex !== -1
+            ? refreshedIndex
+            : Math.min(pageIndex, totalCategories.length - 1);
+
+        showDishPage(safeIndex, direction);
+    }
+
+    function showDishPage(pageIndex, direction = 'none') {
+        if (pageIndex < 0 || pageIndex >= totalCategories.length) return;
+
+        const category = totalCategories[pageIndex];
+        const dishes = totalDishes[category] || [];
+        const availableDishes = dishes.filter(dish => isDishAvailable(dish));
+        const unavailableDishes = dishes.filter(dish => !isDishAvailable(dish));
+
+        dishesSwipeContent.innerHTML = '';
+        const pageElement = document.createElement('div');
+        pageElement.className = 'dishes-page';
+
+        if (availableDishes.length > 0) {
+            const availableContainer = document.createElement('div');
+            updating_dish_card(availableContainer, availableDishes);
+            pageElement.appendChild(availableContainer);
+            animateCards(availableContainer);
+        } else {
+            pageElement.appendChild(createCenteredMessage('Товаров не осталось в наличии'));
+        }
+
+        if (unavailableDishes.length > 0) {
+            pageElement.appendChild(createSubTitle('Нет в наличии'));
+
+            const unavailableContainer = document.createElement('div');
+            updating_dish_card(unavailableContainer, unavailableDishes);
+            pageElement.appendChild(unavailableContainer);
+            animateCards(unavailableContainer);
+
+            setTimeout(() => {
+                styleUnavailableCards(unavailableContainer, unavailableDishes);
+            }, 0);
+        }
+
+        if (direction === 'left') {
+            pageElement.classList.add('page-enter-right');
+        } else if (direction === 'right') {
+            pageElement.classList.add('page-enter-left');
+        }
+
+        dishesSwipeContent.appendChild(pageElement);
+
+        if (direction !== 'none') {
+            requestAnimationFrame(() => {
+                pageElement.classList.add('page-enter-active');
+            });
+        }
+
+        const button = menuButtons[pageIndex];
+        if (button) {
+            activateButton(button, menuButtons, titleChapter);
+        } else {
+            titleChapter.textContent = category;
+        }
+
+        dishesCurrentPage = pageIndex;
+    }
+
+    function syncBasketUi() {
+        const basketHasCards = !!dishesPageBasket.querySelector('.card_dish');
+        const orderHasCards = !!dishesPageOrder.querySelector('.card_dish');
+
+        if (basketCurrentPage === 0) {
+            qrcodeContainer.style.display = 'none';
+            setOrderBtn.style.display = basketHasCards ? 'block' : 'none';
+            removeOrderBtn.style.display = 'none';
+        } else {
+            qrcodeContainer.style.display = orderLoaded ? 'flex' : 'none';
+            setOrderBtn.style.display = 'none';
+            removeOrderBtn.style.display = orderLoaded && orderHasCards ? 'block' : 'none';
+        }
+    }
+
+    function showBasketLoader(container, count = 3) {
+        container.innerHTML = Array.from({ length: count }).map(() => `
+            <div class="card_skeleton">
+                <div class="card_skeleton_img"></div>
+                <div class="card_skeleton_body">
+                    <div class="card_skeleton_line"></div>
+                    <div class="card_skeleton_line short"></div>
+                    <div class="card_skeleton_line medium"></div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    async function fetchStudentId() {
+        try {
+            const token = getCookie('access_token');
+            if (token) {
+                const payload = parseJwtModern(token);
+                if (payload && payload.student_id) {
+                    return payload.student_id;
+                }
+            }
+        } catch (e) {
+            console.log('Не удалось получить ID из токена:', e);
+        }
+        
+        const response = await fetch('/api/orders/order', {
+            method: 'GET',
+            credentials: 'include'
+        });
+
+        if (!response.ok) {
+            throw new Error('Не удалось получить идентификатор студента');
+        }
+
+        const data = await response.json();
+
+        if (data.Student_ID) {
+            return data.Student_ID;
+        }
+
+        throw new Error('Student_ID не найден в ответе сервера');
+    }
+
+    function displayClientId(studentId) {
+        const clientIdDisplay = document.getElementById('client_id_display');
+        if (clientIdDisplay) {
+            clientIdDisplay.textContent = `ID: ${studentId}`;
+        }
+    }
+
+    function recreateQRCode(studentId) {
+        if (!qrcode) return;
+
+        qrcode.innerHTML = '';
+
+        try {
+            qrCodeInstance = new QRCode(qrcode, {
+                text: encodeURIComponent(String(studentId)),
+                width: 300,
+                height: 300,
+                colorDark: '#000000',
+                colorLight: '#ffffff',
+                correctLevel: QRCode.CorrectLevel.H
+            });
+        } catch (error) {
+            console.error('Ошибка создания QR-кода:', error);
+            qrcode.innerHTML = '<div style="color: red;">Ошибка создания QR-кода</div>';
+        }
+    }
+
+    async function generateQRCodeAndDisplayId() {
+        try {
+            const studentId = await fetchStudentId();
+            currentStudentId = studentId;
+            displayClientId(studentId);
+            recreateQRCode(studentId);
+        } catch (error) {
+            console.error('Ошибка:', error);
+            show_message(error.message, '-');
+            const clientIdDisplay = document.getElementById('client_id_display');
+            if (clientIdDisplay) {
+                clientIdDisplay.textContent = 'ID не доступен';
+            }
+            if (qrcode) {
+                qrcode.innerHTML = '<div style="color: #ff4444; padding: 20px; text-align: center;">❌ Ошибка загрузки QR-кода</div>';
+            }
+        }
+    }
+
+    async function updateBasketPage(animate = false) {
+        if (basketLoading) return;
+        basketLoading = true;
+
+        if (!basketLoaded && dishesPageBasket.innerHTML.trim() === '') {
+            showBasketLoader(dishesPageBasket);
+        }
+
+        try {
+            const response = await fetch('/api/basket/dish', {
+                method: 'GET',
+                credentials: 'include',
+                cache: 'no-store'
+            });
+
+            if (!response.ok) {
+                throw new Error('HTTP error!');
+            }
+
+            const data = await response.json();
+            const dishes = data.dishes || [];
+
+            dishesPageBasket.innerHTML = '';
+            updating_dish_card(dishesPageBasket, dishes, 'dish_card_in_basket');
+            updateOrderTotalPrice(dishesPageBasket);
+            animateCards(dishesPageBasket);
+            basketLoaded = true;
+
+            if (animate && basketCurrentPage === 0) {
+                dishesPageBasket.classList.remove('panel-fade-in');
+                void dishesPageBasket.offsetWidth;
+                dishesPageBasket.classList.add('panel-fade-in');
+            }
+
+            syncBasketUi();
+        } catch (error) {
+            console.error(error);
+            show_message('Ошибка загрузки', '-');
+        } finally {
+            basketLoading = false;
+        }
+    }
+
+    async function updateOrderPage(animate = false) {
+        if (orderLoading) return;
+        orderLoading = true;
+
+        if (!orderLoaded && dishesPageOrder.innerHTML.trim() === '') {
+            showBasketLoader(dishesPageOrder);
+        }
+
+        try {
+            const response = await fetch('/api/orders/order', {
+                method: 'GET',
+                credentials: 'include',
+                cache: 'no-store'
+            });
+
+            if (!response.ok) {
+                throw new Error('HTTP error!');
+            }
+
+            const data = await response.json();
+            const dishes = data.Orders || [];
+
+            dishesPageOrder.innerHTML = '';
+            updating_dish_card(dishesPageOrder, dishes, 'dishes_container_const_amount');
+            updateOrderTotalPrice(dishesPageOrder);
+            animateCards(dishesPageOrder);
+
+            if (currentStudentId) {
+                recreateQRCode(currentStudentId);
+            } else {
+                await generateQRCodeAndDisplayId();
+            }
+
+            orderLoaded = true;
+
+            if (animate && basketCurrentPage === 1) {
+                dishesPageOrder.classList.remove('panel-fade-in');
+                void dishesPageOrder.offsetWidth;
+                dishesPageOrder.classList.add('panel-fade-in');
+            }
+
+            syncBasketUi();
+        } catch (error) {
+            console.error(error);
+            show_message('Ошибка загрузки', '-');
+        } finally {
+            orderLoading = false;
+        }
+    }
+
+    function renderBasketMenu() {
+        renderMenu(
+            [
+                { id: 'btn_first_dish', label: 'Корзина' },
+                { id: 'btn_second_dish', label: 'Заказ' }
+            ],
+            (pageIndex) => goToBasketPage(pageIndex)
+        );
+    }
+
+    async function goToBasketPage(pageIndex) {
+        if (pageIndex < 0 || pageIndex > 1) return;
+
+        basketSwipeContent.style.transform = `translateX(-${pageIndex * 50}%)`;
+
+        const button = menuButtons[pageIndex];
+        if (button) {
+            activateButton(button, menuButtons, titleChapter);
+        }
+
+        basketCurrentPage = pageIndex;
+        syncBasketUi();
+
+        if (pageIndex === 0) {
+            await updateBasketPage(true);
+        }
+
+        if (pageIndex === 1) {
+            await updateOrderPage(true);
+        }
+    }
+
+    async function switchRoute(route, forceRefresh = false) {
+        if (route === currentRoute && !forceRefresh) return;
+
+        currentRoute = route;
+        syncHeaderIcons(route);
+
+        if (route === ROUTES.DISHES) {
+            routeBasket.classList.remove('is-active');
+            routeDishes.classList.add('is-active');
+            animateRoute(routeDishes);
+
+            await refreshAndShowDishPage(dishesCurrentPage, 'none');
+            return;
+        }
+
+        routeDishes.classList.remove('is-active');
+        routeBasket.classList.add('is-active');
+        animateRoute(routeBasket);
+
+        renderBasketMenu();
+        await goToBasketPage(basketCurrentPage);
+    }
+
+    function preloadBasketData() {
+        updateBasketPage(false);
+    }
+
+    dishesNavLink.addEventListener('click', async (event) => {
+        event.preventDefault();
+        history.replaceState(null, '', './dishes.html');
+        await switchRoute(ROUTES.DISHES, true);
+    });
+
+    basketNavLink.addEventListener('click', async (event) => {
+        event.preventDefault();
+        history.replaceState(null, '', './basket.html');
+        await switchRoute(ROUTES.BASKET, true);
+    });
+
+    dishesSwipeContainer.addEventListener('touchstart', (e) => {
+        dishesStartX = e.touches[0].clientX;
+        dishesStartY = e.touches[0].clientY;
+    }, { passive: true });
+
+    dishesSwipeContainer.addEventListener('touchend', (e) => {
+        if (currentRoute !== ROUTES.DISHES) return;
+
+        const diffX = dishesStartX - e.changedTouches[0].clientX;
+        const diffY = dishesStartY - e.changedTouches[0].clientY;
+
+        if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 50) {
+            if (diffX > 0) {
+                refreshAndShowDishPage(dishesCurrentPage + 1, 'left');
+            } else {
+                refreshAndShowDishPage(dishesCurrentPage - 1, 'right');
+            }
+        }
+    }, { passive: true });
+
+    basketSwipeContainer.addEventListener('touchstart', (e) => {
+        basketStartX = e.touches[0].clientX;
+        basketStartY = e.touches[0].clientY;
+    }, { passive: true });
+
+    basketSwipeContainer.addEventListener('touchend', (e) => {
+        if (currentRoute !== ROUTES.BASKET) return;
+
+        const diffX = basketStartX - e.changedTouches[0].clientX;
+        const diffY = basketStartY - e.changedTouches[0].clientY;
+
+        if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 50) {
+            if (diffX > 0) {
+                goToBasketPage(basketCurrentPage + 1);
+            } else {
+                goToBasketPage(basketCurrentPage - 1);
+            }
+        }
+    }, { passive: true });
+
+    if (qrcode) {
+        qrcode.addEventListener('click', (e) => {
+            e.stopPropagation();
+
+            if (isQrExpanded) {
+                qrcode.style.transform = 'scale(1)';
+                qrcode.style.zIndex = '';
+                isQrExpanded = false;
+            } else {
+                qrcode.style.transform = 'scale(1.5)';
+                qrcode.style.zIndex = '1000';
+                isQrExpanded = true;
+            }
+        });
+    }
+
+    document.addEventListener('click', (e) => {
+        if (isQrExpanded && qrcode && !qrcode.contains(e.target)) {
+            qrcode.style.transform = 'scale(1)';
+            qrcode.style.zIndex = '';
+            isQrExpanded = false;
+        }
+    });
+
+    dishesSwipeContent.addEventListener('click', (e) => {
+        const addButton = e.target.closest('.add_basket');
+        if (!addButton) return;
+
+        e.preventDefault();
+        e.stopPropagation();
+
+        const card = addButton.closest('.card_dish');
+        if (!card) return;
+
+        const amount = card.querySelector('.counter_value');
+        if (!amount) return;
+
+        clearTimeout(basketUpdateTimeout);
+        show_message('Отправка данных', '', 800);
+
+        addButton.disabled = true;
+
+        basketUpdateTimeout = setTimeout(async () => {
+            try {
+                const requestData = {
+                    dish_id: Number(card.dataset.dishId),
+                    cart_quantity: Number(amount.textContent)
+                };
+
+                const response = await fetch('/api/basket/dish', {
+                    headers: { 'Content-Type': 'application/json' },
+                    method: 'POST',
+                    credentials: 'include',
+                    body: JSON.stringify(requestData)
+                });
+
+                const data = await response.json();
+                if (!response.ok) {
+                    if (data.detail && data.detail.includes('Too many dishes')) {
+                        throw new Error('Для корзины превышено количество блюд');
+                    }
+                    throw new Error('HTTP error!');
+                }
+
+                show_message('Блюдо добавлено в корзину', '+', 800);
+
+                // Важно: список блюд здесь не обновляем, чтобы карточки не исчезали
+                // и не проигрывали повторную анимацию после добавления в корзину.
+                // Только помечаем корзину устаревшей — она обновится при открытии.
+                basketLoaded = false;
+            } catch (error) {
+                show_message(error.message || error, '-');
+            } finally {
+                addButton.disabled = false;
+            }
+        }, 900);
+    });
+
+    dishesPageBasket.addEventListener('click', (e) => {
+        const counterBtn = e.target.closest('.counter_plus, .counter_minus');
+        if (!counterBtn) return;
+        const card = counterBtn.closest('.card_dish');
+        if (!card) return;
+
+        clearTimeout(basketUpdateTimeout);
+        basketUpdateTimeout = setTimeout(async () => {
+            try {
+                const amount = card.querySelector('.counter_value');
+                const requestData = {
+                    dish_id: card.dataset.dishId,
+                    cart_quantity: amount.textContent
+                };
+                const response = await fetch('/api/basket/quantity', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify(requestData)
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    if (data.detail && data.detail.includes('Too many dishes')) {
+                        throw new Error('Для корзины превышено количество блюд');
+                    }
+                    throw new Error('HTTP error!');
+                }
+
+                orderLoaded = false;
+                dishesLoaded = false;
+            } catch (error) {
+                show_message(error.message, '-');
+            }
+        }, 2000);
+    });
+
+    dishesPageBasket.addEventListener('click', async (e) => {
+        const card = e.target.closest('.card_dish');
+        if (!card) return;
+
+        if (e.target.closest('.dell_basket')) {
+            try {
+                const response = await fetch(`/api/basket/dish?dish_id=${card.dataset.dishId}`, {
+                    method: 'DELETE',
+                    credentials: 'include'
+                });
+
+                if (!response.ok) {
+                    throw new Error('HTTP error!');
+                }
+
+                card.remove();
+                updateOrderTotalPrice(dishesPageBasket);
+                orderLoaded = false;
+                dishesLoaded = false;
+                syncBasketUi();
+            } catch (error) {
+                console.error(error);
+                show_message('Ошибка удаления', '-');
+            }
+        }
+    });
+
+    setOrderBtn.addEventListener('click', async () => {
+        try {
+            const response = await fetch('/api/orders/order', {
+                method: 'POST',
+                credentials: 'include'
+            });
+
+            if (!response.ok) {
+                throw new Error('HTTP error!');
+            }
+
+            show_message('Заказ сформирован', '+');
+            basketLoaded = false;
+            orderLoaded = false;
+            dishesLoaded = false;
+            await updateBasketPage(false);
+            syncBasketUi();
+        } catch (error) {
+            console.error(error);
+            show_message('Ваш заказ уже сформирован или количество активных блюд меньше чем у вас в корзине', '-', 3500);
+        }
+    });
+
+    removeOrderBtn.addEventListener('click', async () => {
+        try {
+            const response = await fetch('/api/orders/order', {
+                method: 'DELETE',
+                credentials: 'include'
+            });
+
+            if (!response.ok) {
+                throw new Error('HTTP error!');
+            }
+
+            show_message('Заказ отменен', '+');
+            basketLoaded = false;
+            orderLoaded = false;
+            dishesLoaded = false;
+            await updateOrderPage(false);
+            syncBasketUi();
+        } catch (error) {
+            console.error(error);
+            show_message('Ошибка отмены заказа', '-');
+        }
+    });
+
+    document.addEventListener('DOMContentLoaded', authRequired('student')(() => {
+        (async () => {
+            await distributionDishes();
+            syncHeaderIcons(currentRoute);
+            routeDishes.classList.toggle('is-active', currentRoute === ROUTES.DISHES);
+            routeBasket.classList.toggle('is-active', currentRoute === ROUTES.BASKET);
+
+            if (currentRoute === ROUTES.DISHES) {
+                renderDishesMenu();
+                if (totalCategories.length > 0) {
+                    showDishPage(0);
+                } else {
+                    dishesSwipeContent.innerHTML = `
+                        <div class="dishes-page">
+                            <div style="text-align: center; margin: 30px auto 20px auto; color: #777; font-size: 1.1rem; width: 90%;">
+                                Товаров не осталось в наличии
+                            </div>
+                        </div>
+                    `;
+                }
+                preloadBasketData();
+            } else {
+                renderBasketMenu();
+                await goToBasketPage(0);
+            }
+        })();
+    }));
+
+    creating_application_elements();
+</script>
+
+<style>
+    .route-screen {
+        display: none;
+    }
+
+    .route-screen.is-active {
+        display: block;
+    }
+
+    .route-enter {
+        animation: routeFadeIn 220ms ease;
+    }
+
+    @keyframes routeFadeIn {
+        from {
+            opacity: 0;
+            transform: translateY(6px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .page-enter-right {
+        opacity: 0;
+        transform: translateX(14px);
+    }
+
+    .page-enter-left {
+        opacity: 0;
+        transform: translateX(-14px);
+    }
+
+    .page-enter-active {
+        opacity: 1;
+        transform: translateX(0);
+        transition: opacity 180ms ease, transform 180ms ease;
+    }
+
+    .card-appear {
+        opacity: 0;
+        transform: translateY(10px);
+        animation: cardAppear 220ms ease forwards;
+    }
+
+    @keyframes cardAppear {
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .panel-fade-in {
+        animation: panelFadeIn 180ms ease;
+    }
+
+    @keyframes panelFadeIn {
+        from {
+            opacity: 0;
+            transform: translateY(8px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    #basket_swipe_container {
+        overflow: hidden;
+        position: relative;
+    }
+
+    #basket_swipe_content {
+        display: flex;
+        width: 200%;
+        align-items: flex-start;
+        transition: transform 260ms cubic-bezier(.22, 1, .36, 1);
+        will-change: transform;
+    }
+
+    .basket-page {
+        flex: 0 0 50%;
+        min-width: 50%;
+    }
+
+    .card_skeleton {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        width: 90%;
+        margin: 14px auto;
+        padding: 14px;
+        border-radius: 14px;
+        background: rgba(0, 0, 0, 0.04);
+        overflow: hidden;
+    }
+
+    .card_skeleton_img {
+        width: 68px;
+        height: 68px;
+        border-radius: 12px;
+        background: linear-gradient(90deg, rgba(0,0,0,.05), rgba(0,0,0,.12), rgba(0,0,0,.05));
+        background-size: 200% 100%;
+        animation: shimmer 1.1s linear infinite;
+        flex: 0 0 68px;
+    }
+
+    .card_skeleton_body {
+        flex: 1;
+    }
+
+    .card_skeleton_line {
+        height: 12px;
+        border-radius: 999px;
+        margin: 10px 0;
+        background: linear-gradient(90deg, rgba(0,0,0,.05), rgba(0,0,0,.12), rgba(0,0,0,.05));
+        background-size: 200% 100%;
+        animation: shimmer 1.1s linear infinite;
+    }
+
+    .card_skeleton_line.short { width: 42%; }
+    .card_skeleton_line.medium { width: 64%; }
+
+    @keyframes shimmer {
+        0% { background-position: 200% 0; }
+        100% { background-position: -200% 0; }
+    }
+
+    #qrcode_wrapper {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 15px;
+        padding: 20px;
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    
+    #qrcode {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        cursor: pointer;
+        transition: transform 0.3s ease;
+    }
+    
+    #qrcode canvas,
+    #qrcode img {
+        max-width: 100%;
+        height: auto;
+        display: block;
+    }
+    
+    #client_id_display {
+        font-size: 16px;
+        font-weight: normal;
+        color: #333;
+        background: white;
+        padding: 8px 16px;
+        border-radius: 4px;
+        font-family: monospace;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    
+    #qrcode_container {
+        display: none;
+        justify-content: center;
+        align-items: center;
+        min-height: 400px;
+        background: #f5f5f5;
+        border-radius: 8px;
+        margin: 10px;
+    }
+    
+    @media (max-width: 768px) {
+        #qrcode_container {
+            min-height: 380px;
+        }
+        
+        #client_id_display {
+            font-size: 14px;
+            padding: 6px 12px;
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .route-enter,
+        .page-enter-active,
+        .card-appear,
+        .panel-fade-in,
+        #basket_swipe_content,
+        #qrcode,
+        .card_skeleton_img,
+        .card_skeleton_line {
+            animation: none !important;
+            transition: none !important;
+        }
+    }
+</style>
+</body>
+</html>

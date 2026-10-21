@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Столовая</title>
+    <link rel="stylesheet" href="./styles/styles.css">
+    <link rel="stylesheet" href="./styles/normal.css">
+    <!-- Yandex.Metrika counter -->
+    <script type="text/javascript">
+        (function(m,e,t,r,i,k,a){
+            m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+            m[i].l=1*new Date();
+            for (var j = 0; j < document.scripts.length; j++) {if (document.scripts[j].src === r) { return; }}
+            k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)
+        })(window, document,'script','https://mc.yandex.ru/metrika/tag.js?id=106329665', 'ym');
+        ym(106329665, 'init', {ssr:true, webvisor:true, clickmap:true, ecommerce:"dataLayer", accurateTrackBounce:true, trackLinks:true});
+    </script>
+    <noscript><div><img src="https://mc.yandex.ru/watch/106329665" style="position:absolute; left:-9999px;" alt="" /></div></noscript>
+    <!-- /Yandex.Metrika counter -->
+</head>
+<body id="enter_page_1">
+    <img id="logo" src="./png/logo_with_full_text.png" alt="Воскресенский колледж">
+    <h1>Столовая</h1>
+    <div class="slanted_line"></div>
+    <form>
+        <p>Для использования приложения скачайте мобильное приложение для вашего устройства.</p>
+        <div style="display: flex; flex-direction: column; align-items: center; width: 100%; gap: 12px;">
+            <button class="basic_button" type="button" id="downloadBtn" style="width: 280px; margin: 0;">Скачать приложение</button>
+            <button class="basic_button" type="button" id="webBtn" style="width: 280px; margin: 0; background-color: #6c757d;">Продолжить в веб-версии</button>
+        </div>
+    </form>
+</body>
+</html>
+<script type="module" defer>
+    import { set_font_size, create_message } from './js/export.js'
+    set_font_size()
+    create_message()
+    const isAndroid = /android/i.test(navigator.userAgent);
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const isDesktop = !isAndroid && !isIOS;
+    const downloadBtn = document.getElementById('downloadBtn');
+    const webBtn = document.getElementById('webBtn');
+    if (isAndroid) {
+        downloadBtn.textContent = 'Скачать APK';
+        downloadBtn.style.display = 'block';
+        webBtn.style.display = 'none';
+        downloadBtn.onclick = () => { window.location.href = '/voscollege.apk'; };
+    } else if (isIOS) {
+        downloadBtn.style.display = 'none';
+        webBtn.textContent = 'Продолжить в веб-версии';
+        webBtn.style.display = 'block';
+        webBtn.onclick = () => { window.location.href = '/login.html'; };
+    } else {
+        downloadBtn.textContent = 'Скачать APK для Android';
+        downloadBtn.style.display = 'block';
+        webBtn.textContent = 'Продолжить в веб-версии';
+        webBtn.style.display = 'block';
+        downloadBtn.onclick = () => { window.location.href = '/voscollege.apk'; };
+        webBtn.onclick = () => { window.location.href = '/login.html'; };
+    }
+    const isInApp = /voscollege/i.test(navigator.userAgent) || window.location.href.includes('app=');
+    if (isInApp) { window.location.href = '/login.html'; }
+</script>

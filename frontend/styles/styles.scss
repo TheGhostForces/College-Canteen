@@ -1,0 +1,1065 @@
+// ===== Общие стили =====
+* {
+    scroll-behavior: smooth;
+    padding: 0;
+    margin: 0;
+    color: rgb(36, 36, 36);
+    box-sizing: border-box;
+    overflow-x: hidden;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 20px;
+}
+
+// ===== CSS-переменные =====
+$bg-color: #F2F2F2;
+$white-color: white;
+$blue-color: #00518D;
+$blue-color-hover: #0073cc;
+$red-color: #E12C2C;
+$transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+$text-size: clamp(1rem, 3.2vw + 0.4rem, 1.5rem);
+$link-size: clamp(0.9rem, 2.7vw + 0.25rem, 1.4rem);
+$text-padding-inline: 0.4em;
+
+// ===== Функции =====
+@mixin markup($dispaly: flex, $justify-content: center, $align-items: center, $flex-direction: row){
+    display: $dispaly;
+    justify-content: $justify-content;
+    align-items: $align-items;
+    flex-direction: $flex-direction;
+}
+
+
+
+p {
+    margin-bottom: 0 !important;
+}
+
+button {
+    border: none;
+    transition: $transition;
+}
+
+// ===== Общие стили =====
+.wrapper_for_btn{
+    @include markup($flex-direction: column);
+    margin-block: 25px;
+}
+.basic_button {
+    padding: 0.8rem;
+    background-color: $blue-color;
+    color: $white-color;
+    border-radius: 10px;
+    font-size: $text-size;
+    cursor: pointer;
+    transition: $transition;
+    min-width: 10vw;
+
+    &:hover {
+        background-color: $blue-color-hover;
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(0, 81, 141, 0.3);
+    }
+
+    &:active {
+        transform: translateY(0);
+    }
+}
+
+#dishes_img,
+#basket_img,
+#orders_history_img,
+#meal_planning_img,
+#update_img,
+#order_search_img,
+#dishes_tomorrow_img,
+#order_packaging_img,
+#dishes_date_img{
+    box-shadow: 0 0 10px 1px #000;
+    border-radius: 5px;
+    transition: $transition;
+    padding: 4px;
+
+    &:hover {
+        transform: scale(1.05);
+        box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
+    }
+}
+
+.error_message {
+    position: fixed;
+    bottom: 7%;
+    width: 100%;
+    z-index: 10;
+    display: none;
+
+    .error_message_text {
+        margin-inline: 10%;
+        text-align: center;
+        background-color: $white-color;
+        color: black;
+        font-size: 1rem;
+        border-radius: 10px;
+        padding: 10px 20px;
+        border: 1px solid black;
+    }
+}
+a{
+    font-size: $link-size !important;
+}
+
+// ===== Страницы =====
+#enter_page_1,
+#enter_page_2,
+#dishes_page,
+#basket_page,
+#orders_history_page,
+#order {
+    background-color: $bg-color;
+    animation: fadeIn 0.3s ease-out;
+}
+
+// ===== Первые 2 страницы сайта =====
+
+#enter_page_1,
+#enter_page_2 {
+    position: relative;
+
+    .slanted_line {
+        position: absolute;
+        width: 1000px;
+        height: 2em;
+        background-color: $blue-color;
+        top: 50%;
+        left: -50px;
+        transform: rotate(-20deg);
+    }
+
+    #logo {
+        height: 16vh;
+        width: 100%;
+        object-fit: contain;
+    }
+
+    form {
+        width: clamp(70vw, 10vh + 20vw, 80vw);
+        height: clamp(420px, 40vh + 10vw, 80vh);
+        background-color: $white-color;
+        border-radius: 15px;
+        padding-bottom: 45px;
+        
+        @include markup($justify-content: space-around, $flex-direction: column);
+        
+        margin: auto;
+        position: relative;
+        box-shadow: 2px 3px 5px rgba(0, 0, 0, 0.3);
+        transition: $transition;
+
+        p {
+            text-align: center;
+            padding-inline: $text-padding-inline;
+            font-size: $text-size;
+        }
+
+        input {
+            border: 2px solid black;
+            border-radius: 10px;
+            padding: 0.5rem 0.9rem;
+            font-size: $text-size;
+            transition: $transition;
+            max-width: 80%;
+
+            &:focus {
+                border-color: $blue-color;
+                box-shadow: 0 0 0 3px rgba(0, 81, 141, 0.1);
+                transform: scale(1.02);
+            }
+        }
+
+        button:focus {
+            background-color: $blue-color-hover;
+            transform: translateY(-2px);
+        }
+
+        a{
+            position: absolute;
+            bottom: 2vw;
+            right: 3vw;
+            transition: $transition;
+
+            &:hover {
+                color: $blue-color;
+                transform: translateX(-5px);
+            }
+        }
+    }
+}
+
+// ===== КАРТОЧКИ БЛЮД =====
+// #dishes_container_let_amount,
+// #dishes_container_const_amount {
+//   display: flex;
+//   justify-content: center;
+//   min-height: 45vh;
+//   flex-direction: column;
+//   row-gap: clamp(2vh, 8vw, 12vh);
+//   padding-top: 2vh;
+//   overflow: hidden;
+// }
+
+
+// ===== Логотип =====
+#div_logo,
+#menu {
+    height: clamp(12vh, 15vw, 35vh);
+}
+
+#div_logo{
+    width: 100%;
+    @include markup();
+}
+
+#div_logo {
+    overflow: hidden;
+    justify-content: start;
+
+    img {
+        height: 100%;
+        object-fit: contain;
+        transition: $transition;
+    }
+}
+
+// ===== Шапка =====
+header {
+    background: $blue-color;
+    height: clamp(8vh, 13vw, 24vh);
+    width: 100%;
+    @include markup($justify-content: space-around);
+
+    a, label {
+        padding-block: 1%;
+        overflow: hidden;
+        width: 100%;
+        height: 100%;
+        @include markup();
+
+        img {
+            height: 100%;
+            object-fit: contain;
+            transition: $transition;
+
+            &:hover {
+                transform: scale(1.1);
+            }
+        }
+    }
+}
+
+// ===== Меню категорий =====
+.btn_underline {
+    background: url("../png/underlining.png") no-repeat bottom / contain;
+}
+
+#menu_dishes {
+    @include markup($justify-content: space-around);
+    flex-wrap: wrap;
+    // height: clamp(7vh, 13vw, 20vh);
+    flex-direction: row;
+    padding-inline: 1.2vw;
+
+    button {
+        transition: $transition;
+        padding: 10px 15px;
+        border-radius: 5px;
+
+        &:active {
+            background: $blue-color;
+            color: white;
+            transform: translateY(-2px);
+        }
+    }
+}
+
+h1,
+h2{
+    text-align: center;
+    margin-block: 1.4vh;
+    font-size: clamp(1.5rem, 6vw + 0.5rem, 3rem);
+    color: $blue-color;
+    @include markup();
+    font-weight: 450;
+    padding-inline: 0.3em;
+}
+h2 {
+    display: none;
+    font-size: clamp(1.3rem, 6vw + 0.4rem, 2.7rem);
+}
+.description_form{
+    margin-block: 1vh;
+    font-size: $text-size;
+    padding-inline: 0.5em;
+
+}
+
+// ===== Карточки блюд =====
+
+.card_dish {
+    opacity: 1;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+
+    @include markup();
+    flex-direction: row;
+    width: 90vw;
+    background: $white-color;
+
+    margin: auto;
+    margin-top: 20px;
+    margin-bottom: 35px;
+    border-radius: 10px;
+    
+    position: relative;
+    overflow: visible;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+
+    &.animate_card_dish {
+        transform: none;
+        opacity: 1;
+    }
+
+    &:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+    }
+
+    .add_basket,
+    .dell_basket {
+        position: absolute;
+        right: -0.6em;
+        top: -0.6em;
+        width: 2em;
+        height: 2em;
+        background: $red-color;
+        color: $white-color;
+        font-weight: bold;
+        border-radius: 3px;
+        z-index: 2;
+        transition: $transition;
+
+        &:active {
+            transform: scale(1.1);
+            background: #c82323;
+        }
+    }
+
+    .card_dish_image {
+        box-sizing: border-box;
+        width: 35%;
+        @include markup();
+        border-radius: 10px 0 0 10px;
+
+        img {
+            object-fit: contain;
+            transition: $transition;
+        }
+    }
+
+    .card_dish_info {
+        width: 65%;
+        clip-path: polygon(0 9%, 1% 4%, 2% 2%, 3% 0, 68% 0, 100% 0, 100% 100%, 39% 100%, 5% 100%, 2% 99%, 1% 97%, 0 92%);
+        background-color: $blue-color;
+        position: relative;
+        @include markup($justify-content: space-around);
+        flex-direction: column;
+        row-gap: 1vw;
+        padding-block: 2vw;
+        
+        border-bottom-right-radius: 10px;
+        border-top-right-radius: 10px;
+        h2 {
+            color: $white-color;
+            // margin-left: 1.3em;
+            font-size: 0.8rem;
+            font-weight: 400;
+            @include markup();
+        }
+
+        .counter_dishes {
+            width: 40%;
+            height: 20%;
+            background: $bg-color;
+            margin: auto;
+            border-radius: 10px;
+            @include markup($justify-content: space-around);
+            transition: $transition;
+
+            padding: 3px;
+            box-sizing: border-box;
+
+            &:hover {
+                transform: scale(1.05);
+            }
+
+            button {
+                font-weight: bold;
+                transition: $transition;
+                width: 30%;
+                height: 100%;
+
+                &:active {
+                    background: $blue-color;
+                    color: white;
+                    transform: scale(1.1);
+                }
+            }
+        }
+
+        .card_dish_info_text {
+            @include markup($justify-content: space-evenly);
+            width: 100%;
+            // margin-left: 1.3em;
+
+            p {
+                color: $white-color;
+                font-size: 0.9rem;
+            }
+        }
+
+            .price_dish {
+                color: $white-color;
+                font-weight: bold;
+            }
+    }
+
+}
+
+#order {
+    #dishes_swipe_content {
+        width: 200% !important;
+    }
+    
+    .dishes-page {
+        // min-width: 50% !important;
+        // width: 50% !important;
+        opacity: 1;
+        pointer-events: auto;
+
+    }
+}
+
+// ===== ОБЩИЕ ИСПРАВЛЕНИЯ ДЛЯ ВСЕХ СТРАНИЦ =====
+// Убедимся, что все страницы с карточками имеют правильную структуру
+
+
+// Для страницы с блюдами (4 страницы)
+
+
+
+// Для страницы корзины (2 страницы)
+
+// // ===== МОДАЛЬНОЕ ОКНО =====
+// #modal_bg {
+//   display: none !important;
+//   width: 100%;
+//   height: 100%;
+//   position: fixed;
+//   top: 0;
+//   left: 0;
+//   z-index: 10;
+//   background-color: rgba(57, 57, 57, 0.853);
+//   display: flex;
+//   justify-content: center;
+//   align-items: center;
+
+//   &.active {
+//     display: flex !important;
+//   }
+
+//   #modal_panel {
+//     width: 90%;
+//     min-height: 40%;
+//     background-color: $bg-color;
+//     border-radius: 10px;
+//     position: relative;
+//     overflow: visible;
+//     display: flex;
+//     justify-content: center;
+//     align-items: center;
+//     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+
+//     #exit_modal_panel {
+//       position: absolute;
+//       top: -0.5em;
+//       right: -0.5em;
+//       background-color: $red-color;
+//       width: 2em;
+//       height: 2em;
+//       border-radius: 5px;
+//       display: flex;
+//       justify-content: center;
+//       align-items: center;
+//       color: $bg-color;
+//       transition: $transition;
+//       cursor: pointer;
+
+//       &:hover {
+//         transform: scale(1.1);
+//         background: #c82323;
+//       }
+//     }
+
+//     #btn_close_order {
+//       width: 60%;
+//       background-color: $blue-color;
+//       color: $bg-color;
+//       border-radius: 10px;
+//       transition: $transition;
+
+//       &:hover {
+//         background-color: $blue-color-hover;
+//         transform: translateY(-2px);
+//       }
+//     }
+//   }
+// }
+
+// ===== НАСТРОЙКИ =====
+.checkbox {
+    display: none;
+}
+
+#menu {
+    width: 100vw;
+    background-color: $bg-color;
+    position: absolute;
+    top: 0;
+    left: 0;
+    transform: translateX(-100%);
+    transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 10;
+    @include markup();
+    justify-content: space-around;
+
+    box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
+
+    &>*{
+        width: 45%;
+        @include markup();
+        flex-direction: column;
+        row-gap: 1vh;
+        height: 100%;
+        
+        div{
+            @include markup();
+            justify-content: space-around;
+            padding: 0.2em;
+            width: 80%;
+            border-radius: 10px;
+            p, button{
+                font-weight: bold;
+            }
+        }
+        #container_loyalty_points{
+            background-color: $white-color;
+            img{
+                width: 1.4em;
+                height: 1.4em;
+            }
+            p{
+                font-size: clamp(1.1rem, 3.2vw + 0.4rem, 1.5rem);
+            }
+        }
+        #container_font_size{
+            background-color: $blue-color;
+            p, button{
+                color: $white-color;
+                border: none;
+                background: transparent;
+            }
+        }
+    }
+
+    img {
+        width: 3em;
+        height: 3em;
+        transition: $transition;
+
+        &:hover {
+            transform: scale(1.1);
+        }
+    }
+}
+
+.checkbox:checked ~ #menu {
+    transform: none
+}
+
+
+
+#order {
+    #qrcode_container {
+        height: 50vh;
+        transition: $transition;
+        
+        @include markup();
+        
+        #qrcode {
+            transition: $transition;
+            img{
+                height: 30vh;
+            }
+        }
+        
+    }
+
+    .basic_button {
+        background-color: $red-color;
+        margin: 0 auto;
+        display: none;
+        &.update_bg{
+            background-color: green;
+        }
+    }
+    
+}
+
+
+
+
+
+
+
+// ===== ИСТОРИЯ ЗАКАЗОВ =====
+.orders_history_container {
+  width: clamp(63vw, 65vh, 90vw);
+  min-height: 52vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: auto;
+  row-gap: 1.8em;
+  flex-direction: column;
+
+  .orders_history_card {
+    width: 100%;
+    height: clamp(7vh, 13vw, 22vh);
+    background-color: $white-color;
+    position: relative;
+    transition: $transition;
+
+    &:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+    }
+
+    .orders_history_bg {
+      width: 90%;
+      height: 100%;
+      position: absolute;
+      left: 0;
+      right: 0;
+      background-image: url("../png/bg_card_orders.png");
+      background-repeat: no-repeat;
+      background-size: contain;
+      background-position: bottom;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      transition: $transition;
+
+      p {
+        color: $bg-color;
+        font-weight: bold;
+        font-size: 1.1rem;
+      }
+    }
+
+    .div_down_btn {
+      width: 13%;
+      height: 100%;
+      position: absolute;
+      top: 0;
+      right: 0;
+
+      .down_btn {
+        width: 100%;
+        height: 100%;
+        font-weight: 900;
+        background-color: transparent;
+        transition: $transition;
+
+        &:hover {
+          background: rgba(0, 0, 0, 0.1);
+          transform: scale(1.1);
+        }
+      }
+    }
+  }
+
+  .hidden_orders {
+    width: 100%;
+    background-color: $white-color;
+    border-radius: 10px;
+    display: none;
+
+    .dish_name {
+      margin-block: 1vh;
+      padding-inline: 1em;
+      transition: $transition;
+
+      &:hover {
+        background: rgba(0, 81, 141, 0.1);
+        transform: translateX(5px);
+      }
+    }
+  }
+}
+
+// ===== ПОДВАЛ =====
+footer {
+    margin-top: 3vh;
+    width: 100vw;
+    background-color: $blue-color;
+    clip-path: polygon(54% 0, 70% 2%, 80% 6%, 87% 13%, 92% 21%, 95% 30%, 98% 40%, 100% 54%, 100% 75%, 100% 100%, 0 100%, 0 0);
+    //   background-image: url("../png/footer_bg.png");
+    //   background-repeat: no-repeat;
+    //   background-position: bottom left;
+    //   background-size: cover;
+
+    p {
+        height: 100%;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        text-align: center;
+        padding: 1.2em 1.7em 0.7em 0.7em;
+        color: $white-color;
+        font-size: 1.1rem;
+    }
+}
+
+// ===== Оператор раздачи и партнер по снабжению  =====
+#meal_plan_week{
+    label{
+        width: 35%;
+    }
+    #option_institution{
+        @include markup();
+        margin: auto;
+        height: clamp(10vh, 8vw, 18vh);
+        border-radius: 10px;
+        width: 90%;
+        background-color: $white-color;
+        transition: $transition;
+        margin-block: 4vh;
+        p{
+            width: 35%;
+            text-align: center;
+        }
+        section{
+            width: 65%;
+            height: 100%;
+            border: none;
+            select{
+                width: 100%;
+                height: 100%;
+                padding: 5px;
+                option{
+                    width: 100%;
+                    height: 100%;
+                    text-align: center;
+
+                }
+            }
+        }
+
+    }
+}
+
+// Общие элементы для ролей: оператор и поставщик
+#meal_planning,
+#order_search,
+#dishes_tomorrow,
+#order_packaging {
+    background-color: $bg-color;
+    padding-bottom: 5vh;
+
+    #close_order{
+        display: none;
+    }
+
+    #container_with_data_from_api{
+        margin-block: 5vh;
+    }
+
+    .mini_card {
+        display: flex;
+
+        margin: auto;
+        width: 95%;
+        margin-block: 4px;
+        border-radius: 10px;
+
+        position: relative;
+        overflow: hidden;
+        
+        background-color: $white-color;
+        transition: $transition;
+
+        *{
+            text-align: center;
+            font-size: 1rem;
+            
+            padding: 0.5em;
+            height: 100%
+        }
+
+        p {
+            @include markup();
+            border-right: 1px solid black;
+            width: 50%;
+        }
+
+        div{
+            width: 50%;
+            p{
+                width: 100%;
+                height: 100%;
+            }
+        }
+
+
+        select {
+            top: 0;
+            right: 0;
+            bottom: 0;
+            width: 50%;
+        }
+
+        input{
+            width: 50%;
+        }
+    }
+
+    #input_hint,
+    .input_hint{
+        display: none;
+    }
+
+    #back_to{
+        display: none;
+    }
+}
+
+#meal_planning{
+    #approving_dishes{
+        display: none;
+    }
+    #input_hint{
+        display: none;
+    }
+}
+
+#order_packaging,
+#dishes_tomorrow{
+    .student_order{
+        width: 95%;
+        margin: auto;
+        margin-top: 10px;
+
+        .title_student_order{
+            width: 100%;
+            background-color: $blue-color;
+
+            @include markup();
+            p{
+                width: 80%;
+                font-size: $text-size;
+                color: $bg-color;
+    
+                padding-left: 1em;
+            }
+        }
+        button{
+            width: 20%;
+
+            background-color: $bg-color;
+
+            @include markup();
+        }
+        .dishes_of_student_order{
+            display: none;
+            background-color: $bg-color;
+            border: 1px solid black;
+            margin-top: 10px;
+            border-radius: 5px;
+            &>:not(:first-child){
+                border-top: 1px solid black;
+            }
+            div{
+                width: 100%;
+                @include markup();
+                justify-content: space-around;
+
+                p{
+                    color: black;
+                }
+            }
+        }
+    }
+}
+
+
+// Стили под каждую страницу
+#order_search{
+    .wrapper_for_btn{
+        flex-direction: column;
+        row-gap: 5vh;
+
+        #back_to_find_client{
+            display: none;
+        }
+    }
+}
+
+
+
+
+// ===== ОБЩАЯ СТОИМОСТЬ =====
+#total_price_section {
+    text-align: center;
+    margin: 20px;
+    background-color: $white-color;
+    padding: 15px;
+    border-radius: 10px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+}
+
+#total_order_price {
+  color: $blue-color;
+  font-size: 1.2em;
+  font-weight: bold;
+  transition: $transition;
+}
+
+// Контейнеры для свайпов
+#dishes_swipe_container {
+    position: relative;
+    overflow: hidden;
+    touch-action: pan-y;
+    -webkit-overflow-scrolling: touch;
+}
+
+#dishes_swipe_content {
+    display: flex;
+    width: 100%;
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    will-change: transform;
+}
+
+.dishes-page {
+  width: 100%;
+  opacity: 1;
+  transition: opacity 0.3s ease;
+  padding: 0.5em;
+
+  &.active {
+    opacity: 1;
+  }
+}
+
+#basket_swipe_container {
+  position: relative;
+  overflow: hidden;
+  min-height: 45vh;
+}
+
+#basket_swipe_content {
+  display: flex;
+  width: 200%;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.basket-page {
+  min-width: 50%;
+  opacity: 1;
+  transition: opacity 0.3s ease;
+
+  &.active {
+    opacity: 1;
+  }
+}
+
+// Индикатор текущей страницы
+.swipe-indicator {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 15px 0;
+  gap: 8px;
+}
+
+.swipe-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #ccc;
+  transition: background-color 0.3s ease;
+
+  &.active {
+    background-color: $blue-color;
+  }
+}
+
+// Предотвращение выделения текста при свайпе
+#dishes_swipe_container {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+}
+
+// Улучшение плавности анимаций
+
+@media (orientation: landscape) {
+  #enter_page_1,
+  #enter_page_2 {
+    #logo,
+    .slanted_line {
+      display: none;
+    }
+  }
+
+  .card_dish .card_dish_image img {
+    width: 65%;
+  }
+
+  #admin_page {
+    #logo {
+      display: none;
+    }
+
+    #link_exit {
+      position: absolute;
+      top: 0;
+      right: 0;
+      margin: 1em;
+    }
+  }
+}
+
+@media (max-width: 768px) {
+  #dishes_swipe_container {
+    min-height: 50vh;
+  }
+
+  .dishes-page {
+    padding: 0 5px;
+  }
+}
+
+@media print {
+    #dishes_tomorrow .mini_card {
+        margin-block: 2px;
+    }
+}

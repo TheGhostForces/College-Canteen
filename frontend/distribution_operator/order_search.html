@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, shrink-to-fit=no">
+    <title>Выдача заказов</title>
+    <link rel="stylesheet" href="../styles/styles.css">
+    <link rel="stylesheet" href="../styles/normal.css">
+</head>
+<body id="order_search">
+    <input type="checkbox" id="menuToggle" class="checkbox">
+    
+    <div id="div_logo">
+        <img src="../png/logo_with_text.png" alt="">
+    </div>
+    
+    <header>
+        <a href="./order_search.html"><img id="order_search_img" src="../png/order_search.png" alt=""></a>
+        <a href="./dishes_tomorrow.html"><img src="../png/dishes_tomorrow.png" alt=""></a>
+        <label for="menuToggle">
+            <img id="settings" src="../png/settings.png" alt="Настройки">
+        </label>
+    </header>
+
+    <h1>Выдача заказа</h1>
+
+    <p class="description_form">Для выдачи заказа отсканируйте QR-код студента.</p>
+
+    <div class="mini_card">
+        <p>ID</p>
+        <input id="input_student_id" autocomplete="off">
+    </div>
+
+    <h2>Данные из базы</h2>
+
+    <div class="mini_card input_hint">
+        <p>Имя</p>
+        <p id="student_name"></p>
+    </div>
+
+    <div class="mini_card input_hint">
+        <p>ID Заказа</p>
+        <p id="order_id"></p>
+    </div>
+
+    <div id="container_with_data_from_api"></div>
+
+    <div id="total_price_section" style="text-align: center; margin: 20px; display: none;">
+        <strong>Общая стоимость заказа: <span id="total_order_price">0</span> руб.</strong>
+    </div>
+
+    <div class="wrapper_for_btn">
+        <button class="basic_button" type="button" id="find_client">Найти клиента</button>
+        <button class="basic_button" type="button" id="close_order">Закрыть заказ</button>
+        <button class="basic_button" type="button" id="back_to">Отменить операцию</button>
+    </div>
+</body>
+</html>
+
+<script type="module" defer>
+    import {
+        show_message,
+        updateOrderTotalPrice,
+        authRequired,
+        creating_application_elements, 
+        check_student_id
+    } from '../js/export.js'
+
+    import { updating_dish_card } from '../js/meal_cards.js'
+
+    let DOM = null;
+
+    const audio = new Audio('../mp3/sound_order_closing.mp3');
+
+    let student_id = null;
+
+    function focusInput() {
+        if (!DOM || !DOM.input_student_id) return;
+
+        setTimeout(() => {
+            DOM.input_student_id.focus();
+            DOM.input_student_id.select?.();
+        }, 30);
+    }
+
+    document.addEventListener('DOMContentLoaded', authRequired('operator')(() => {
+        DOM = {
+            student_name: document.getElementById('student_name'),
+            order_id: document.getElementById('order_id'),
+            input_student_id: document.getElementById('input_student_id'),
+
+            container_with_data_from_api: document.getElementById('container_with_data_from_api'),
+
+            close_order: document.getElementById('close_order'),
+            back_to: document.getElementById('back_to'),
+            find_client: document.getElementById('find_client'),
+
+            h2: document.querySelector('h2'),
+            input_hint: document.querySelectorAll('.input_hint'),
+        }
+
+        DOM.back_to.addEventListener('click', back_to_func);
+        DOM.close_order.addEventListener('click', close_order_func);
+        DOM.find_client.addEventListener('click', find_client_func);
+
+        DOM.input_student_id.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                find_client_func();
+            }
+        });
+
+        document.addEventListener('click', (e) => {
+            if (e.target !== DOM.input_student_id) {
+                focusInput();
+            }
+        });
+
+        document.addEventListener('focusin', (e) => {
+            if (e.target !== DOM.input_student_id) {
+                focusInput();
+            }
+        });
+
+        window.addEventListener('load', focusInput);
+        window.addEventListener('pageshow', focusInput);
+
+        focusInput();
+    }));
+    
+    async function find_client_func() {
+        try {
+            student_id = check_student_id(DOM.input_student_id.value);
+
+            const response = await fetch(`/api/orders/student_order?student_id=${encodeURIComponent(student_id)}`, {
+                method: 'GET',
+                credentials: 'include'
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                if (data.detail.includes('Student not found')) {
+                    throw new Error('Студента нет в базе данных');
+                }
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const dataOrders = data.Orders;
+
+            if (!data || Object.keys(dataOrders).length === 0) {
+                throw new Error('Заказ пуст');
+            }
+
+            updating_dish_card(
+                DOM.container_with_data_from_api,
+                dataOrders,
+                'dishes_container_const_amount'
+            );
+            
+            updateOrderTotalPrice();
+
+            DOM.find_client.style.display = 'none';
+            DOM.close_order.style.display = 'block';
+            DOM.back_to.style.display = 'block';
+
+            DOM.input_hint.forEach(element => {
+                element.style.display = 'flex';
+            });
+
+            DOM.student_name.textContent = data.Name;
+            DOM.order_id.textContent = Object.keys(data.Orders);
+
+            focusInput();
+
+        } catch (error) {
+            console.log(error);
+            show_message(error, '-');
+            focusInput();
+        }
+    }
+    
+    async function close_order_func() {
+        try {
+            const response = await fetch(`/api/orders/order?student_id=${encodeURIComponent(student_id)}`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                credentials: 'include'
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            audio.play();
+
+            DOM.find_client.style.display = 'block';
+            DOM.close_order.style.display = 'none';
+            DOM.back_to.style.display = 'none';
+            
+            DOM.container_with_data_from_api.innerHTML = '';
+            DOM.input_student_id.value = '';
+            student_id = null;
+            updateOrderTotalPrice();
+
+            DOM.input_hint.forEach(element => {
+                element.style.display = 'none';
+            });
+
+            DOM.student_name.textContent = '';
+            DOM.order_id.textContent = '';
+
+            focusInput();
+
+        } catch (error) {
+            console.error(error);
+            show_message('Ошибка при закрытии заказа', '-');
+            focusInput();
+        }
+    }
+
+    function back_to_func() {
+        DOM.find_client.style.display = 'block';
+        DOM.close_order.style.display = 'none';
+        DOM.back_to.style.display = 'none';
+        
+        DOM.container_with_data_from_api.innerHTML = '';
+        DOM.input_student_id.value = '';
+        student_id = null;
+        updateOrderTotalPrice();
+
+        DOM.input_hint.forEach(element => {
+            element.style.display = 'none';
+        });
+        
+        DOM.student_name.textContent = '';
+        DOM.order_id.textContent = '';
+
+        focusInput();
+    }
+
+    creating_application_elements();
+</script>
