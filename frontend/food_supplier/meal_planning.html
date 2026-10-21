@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, shrink-to-fit=no">
+    
+    <title>Планирование заказов</title>
+    
+    <link rel="stylesheet" href="../styles/styles.css">
+    <link rel="stylesheet" href="../styles/normal.css">
+</head>
+<body id="meal_planning">
+    <input type="checkbox" id="menuToggle" class="checkbox">
+    
+    <div id="div_logo">
+        <img src="../png/logo_with_text.png" alt="">
+    </div>
+    
+    <header>
+        <a href="./meal_planning.html"><img id="dishes_date_img" src="../png/dishes_date.png" alt="Картинка"></a>
+        <a href="./order_packaging.html"><img src="../png/order_packaging.png" alt="Картинка"></a>
+        <label for="menuToggle">
+            <img id="settings" src="../png/settings.png" alt="Настройки">
+        </label>
+    </header>
+
+    <h1>Планирование пищевого рациона</h1>
+
+    <p class="description_form">
+        Составляем меню на неделю по вашему запросу: выберите дату и задайте верхнюю границу по количеству блюд.
+    </p>
+
+    <div class="mini_card">
+        <p>Дата</p>
+        <input type="date" id="date_dishes">
+    </div>
+
+    <div class="mini_card">
+        <p>Образовательная организация</p>
+        <select id="selection">
+            <option value="" disabled selected>Название</option>
+        </select>
+    </div>
+
+    <h2>Данные из базы</h2>
+
+    <div class="mini_card" id="input_hint">
+        <p>Название</p>
+        <p style="border: none;">Количество</p>
+    </div>
+
+    <div id="container_with_data_from_api"></div>
+
+    <div class="wrapper_for_btn">
+        <button class="basic_button" type="submit" id="approving_dishes">Утвердить</button>
+        <button class="basic_button" type="submit" id="find_dishes">Найти</button>
+    </div>
+</body>
+</html>
+
+<script type="module" defer>
+    import {
+        show_message,
+        authRequiredAsync,
+        date_verification,
+        creating_application_elements, 
+    } from '../js/export.js'
+
+    import { createSmallCards } from '../js/meal_mini_cards.js'
+
+    // Контейнер для блюд
+    const container_with_data_from_api = document.getElementById('container_with_data_from_api')
+
+    // Выпадающий список для выбора названия, дата
+    const selection = document.getElementById('selection')
+    const date_dishes = document.getElementById('date_dishes')
+
+    const h2 = document.querySelector('h2')
+
+    // Подсказка
+    const input_hint = document.getElementById('input_hint')
+
+    // Кнопки
+    const approving_dishes = document.getElementById('approving_dishes')
+    const find_dishes = document.getElementById('find_dishes')
+
+    const institutions = {}
+
+    // Функция: выделять число в input при клике
+    function enableInputAutoSelect() {
+        const quantityInputs = container_with_data_from_api.querySelectorAll('input');
+
+        quantityInputs.forEach(input => {
+            input.addEventListener('focus', () => {
+                setTimeout(() => input.select(), 0);
+            });
+
+            input.addEventListener('mouseup', (e) => {
+                e.preventDefault();
+            });
+        });
+    }
+
+    // Загрузка всех учебных заведений
+    document.addEventListener('DOMContentLoaded', authRequiredAsync('provider')(async () => {
+        try {
+            const response = await fetch(`/api/institution/institutions`, {
+                method: 'GET',
+            });
+
+            const data = (await response.json()).Institutions
+
+            data.forEach(element => {
+                selection.innerHTML += `<option>${element.name}</option>`
+                institutions[element.name] = element.id
+            })
+
+            h2.style.display = 'none'
+            input_hint.style.display = 'none'
+            approving_dishes.style.display = 'none'
+            container_with_data_from_api.style.display = 'none'
+
+        } catch (error) {
+            console.log(error)
+            show_message(error, false)
+        }
+    }))
+
+    // =========================
+    // Поиск блюд
+    // =========================
+    find_dishes.addEventListener('click', async () => {
+        try {
+            if (!selection.value) {
+                throw new Error('Учебное заведение не выбрано');
+            }
+
+            const date = date_verification(date_dishes.value)
+            const institution_id = institutions[selection.value]
+
+            const response = await fetch(
+                `/api/dishes/date_dishes?institution_id=${institution_id}&target_date=${date}`,
+                {
+                    method: 'GET'
+                }
+            );
+
+            const data = (await response.json()).dishes
+
+            createSmallCards(
+                container_with_data_from_api,
+                data,
+                'mini_card_with_let_amount'
+            )
+
+            // Включаем авто-выделение значений
+            enableInputAutoSelect();
+
+            // Показ всех элементов
+            container_with_data_from_api.style.display = 'block'
+            approving_dishes.style.display = 'block'
+            input_hint.style.display = 'flex'
+            h2.style.display = 'flex'
+
+        } catch (error) {
+            console.log(error)
+            show_message(error, false)
+        }
+    })
+
+    // =========================
+    // Утверждение блюд
+    // =========================
+    approving_dishes.addEventListener('click', async () => {
+        try {
+            if (!selection.value) {
+                throw new Error('Учебное заведение не выбрано');
+            }
+
+            const institution_id = institutions[selection.value]
+            const date = date_verification(date_dishes.value)
+            
+            const total_mini_cards = [...document.querySelectorAll('.mini_card')].slice(3);
+
+            const items_for_server = []
+            
+            total_mini_cards.forEach((element, index) => {
+                const dish_id = element.dataset.dishId
+                const count = element.querySelector('input').value
+
+                if (!count > 0 && count <= 500) {
+                    throw new Error(`Неверное количество в строке ${index + 1}`)
+                }
+
+                items_for_server.push({
+                    dish_id: dish_id,
+                    cart_quantity: count
+                })
+            })
+
+            const response = await fetch(
+                `/api/dishes/dishes?institution_id=${institution_id}&target_date=${date}`,
+                {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ items: items_for_server })
+                }
+            );
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            show_message(`Успешно оформлено на ${date}`, true)
+
+            // Скрытие всех элементов
+            container_with_data_from_api.style.display = 'none'
+            approving_dishes.style.display = 'none'
+            input_hint.style.display = 'none'
+            h2.style.display = 'none'
+
+        } catch (error) {
+            console.error(error)
+            show_message(error, false)
+        }
+    })
+
+    creating_application_elements()
+</script>

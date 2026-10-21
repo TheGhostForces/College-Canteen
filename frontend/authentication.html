@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Аутентификация</title>
+    <link rel="stylesheet" href="./styles/styles.css">
+    <link rel="stylesheet" href="./styles/normal.css">
+</head>
+<body id="enter_page_2">
+    <img id="logo" src="./png/logo_with_full_text.png" alt="Воскресенский колледж">
+
+    <h1>Аутентификация</h1>
+
+    <div class="slanted_line"></div>
+
+    <form>
+        <p>Для входа в личный кабинет введите код, отправленный Вам на почту.</p>
+        <input 
+            id="input_id"
+            name="sms_code"
+            placeholder="Формат: 123456"
+            type="tel"
+            pattern="\d{6}"
+            maxlength="6"
+            required>
+        <button id="submitButton" class="basic_button" type="submit">Войти</button>
+        <a href="./index.html">Вернуться назад</a>
+    </form>
+</body>
+</html>
+
+<script type="module" defer>
+    import {
+        show_message,
+        setCookie,
+        getCookie,
+        rights_verification,
+        create_message,
+        set_font_size
+    } from './js/export.js'
+
+    set_font_size()
+    create_message()
+
+    let DOM = null;
+
+    document.addEventListener('DOMContentLoaded', () => {
+        DOM = {
+            form: document.querySelector('form'),
+            input: document.getElementById('input_id'),
+            submitButton: document.getElementById('submitButton'),
+            errorMessage: document.querySelector('.error_message_text')
+        };
+        
+        if (DOM.form) {
+            DOM.form.addEventListener('submit', handleSubmit);
+        }
+    })
+
+    async function handleSubmit(e) {
+        e.preventDefault();
+
+        show_message('Отправка данных ...')
+        DOM.submitButton.disabled = true
+        
+        try {
+            const sms = DOM.input.value;
+            
+            if (!sms || !/^\d{6}$/.test(sms)) {
+                throw new Error('Код должен состоять из 6 цифр');
+            }
+
+            const user_authentication = getCookie('user_authentication')
+            
+            if (!user_authentication) {
+                window.location.href = './index.html'
+            }
+
+            console.log(user_authentication)
+            console.log(sms)
+            
+            const response = await fetch(
+                `/api/auth/confirm?` +
+                `user_id=${user_authentication.user_id}&` +
+                `temporary_code_id=${user_authentication.tmp_code_id}&` +
+                `code=${sms}`, 
+                {
+                    method: 'POST',
+                    credentials: 'include'
+                }
+            );
+
+            const data = await response.json();
+
+            console.log(data)
+
+            if (!response.ok) {
+                if (data.detail.includes('Code expired') || data.detail.includes('Code already used')) {
+                    throw new Error('Код неправильный или истек. Запросите новый код.');
+                } else {
+                    throw new Error(`Ошибка сервера: ${response.status}`);
+                }
+            }
+
+            setCookie('user_token', data.access_token, 5)
+            rights_verification(data.access_token)  
+            
+        } catch (error) {
+            console.error(error);
+            show_message(error.message || 'Неверный id', '-')
+        }
+
+        DOM.submitButton.disabled = false
+    }
+</script>

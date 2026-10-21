@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Корзина и заказ</title>
+    <link rel="stylesheet" href="../styles/styles.css">
+    <link rel="stylesheet" href="../styles/normal.css">
+</head>
+<body id="order">
+    <input type="checkbox" id="menuToggle" class="checkbox">
+
+    <div id="div_logo">
+        <img src="../png/logo_with_text.png" alt="">
+    </div>
+    
+    <header>
+        <a href="./dishes.html"><img src="../png/eat.png" alt=""></a>
+        <a href="./basket.html"><img id="basket_img" src="../png/korzina.png" alt=""></a>
+        <!-- <a href="./orders_history.html"><img src="../png/order_history.png" alt=""></a> -->
+        <label for="menuToggle">
+            <img id="settings" src="../png/settings.png" alt="Настройки">
+        </label>
+    </header>
+
+    <ul id="menu_dishes">
+        <li><button id="btn_first_dish">Корзина</button></li>
+        <li><button id="btn_second_dish">Заказ</button></li>
+    </ul>
+
+    <h1>Корзина</h1>
+
+    <!-- Блок для отображения общей стоимости -->
+    <div id="total_price_section" style="text-align: center; margin: 20px; display: none;">
+        <strong>Общая стоимость заказа: <span id="total_order_price">0</span> руб.</strong>
+    </div>
+    
+    <div id="dishes_swipe_container">
+        <div id="qrcode_container">
+            <div id="qrcode_wrapper">
+                <div id="qrcode"></div>
+                <div id="client_id_display"></div>
+            </div>
+        </div>
+        <div id="dishes_swipe_content">
+            <div id="dishes_page_basket" class="dishes-page"></div>
+            <div id="dishes_page_order" class="dishes-page"></div>
+        </div>
+    </div>
+    
+    <div id="order_container"></div>
+
+    <div class="wrapper_for_btn">
+        <button class="basic_button" id="remove_order">Отменить заказ</button>
+        <button class="basic_button update_bg" id="set_order">Оформить заказ</button>
+    </div>
+
+    <div id="error_message" class="error_message" style="display: none;">
+        <p class="error_message_text"></p>
+    </div>
+
+    <footer>
+        <p>Здесь может быть какая-то пояснительная информация</p>
+    </footer>
+</body>
+</html>
+
+<!-- Библиотека для создания QR-кода -->
+<script src="https://cdn.jsdelivr.net/npm/davidshimjs-qrcodejs@0.0.2/qrcode.min.js"></script>
+<script type="module" defer>
+    import {
+        activateButton,
+        show_message,
+        getCookie,
+        authRequired,
+        updateOrderTotalPrice,
+        creating_application_elements,
+        parseJwtModern
+    } from '../js/export.js'
+
+    import { updating_dish_card } from '../js/meal_cards.js'
+
+    // ==================== НОВЫЙ КОД ДЛЯ QR И ID КЛИЕНТА ====================
+    // Переменная для хранения ID клиента
+    let currentStudentId = null;
+    let qrCodeInstance = null;
+
+    // Функция для получения Student_ID из API
+    async function fetchStudentId() {
+        // Пробуем получить из cookie или JWT токена
+        try {
+            // Сначала пробуем получить из JWT токена
+            const token = getCookie('access_token');
+            if (token) {
+                const payload = parseJwtModern(token);
+                if (payload && payload.student_id) {
+                    return payload.student_id;
+                }
+            }
+        } catch (e) {
+            console.log('Не удалось получить ID из токена:', e);
+        }
+        
+        // Если не получилось из токена, делаем запрос к API
+        const response = await fetch('/api/orders/order', {
+            method: 'GET',
+            credentials: 'include'
+        });
+        if (!response.ok) {
+            throw new Error('Не удалось получить идентификатор студента');
+        }
+        const data = await response.json();
+        // Ожидаем, что в ответе есть поле Student_ID
+        if (data.Student_ID) {
+            return data.Student_ID;
+        }
+        throw new Error('Student_ID не найден в ответе сервера');
+    }
+
+    // Функция для отображения ID клиента
+    function displayClientId(studentId) {
+        const clientIdDisplay = document.getElementById('client_id_display');
+        if (clientIdDisplay) {
+            clientIdDisplay.textContent = `ID: ${studentId}`;
+        }
+    }
+
+    // Функция для очистки и пересоздания QR-кода
+    function recreateQRCode(studentId) {
+        const qrcodeContainer = document.getElementById('qrcode');
+        if (!qrcodeContainer) return;
+        
+        // Очищаем контейнер
+        qrcodeContainer.innerHTML = '';
+        
+        // Создаем новый QR-код с увеличенным размером
+        try {
+            qrCodeInstance = new QRCode(qrcodeContainer, {
+                text: encodeURIComponent(String(studentId)),
+                width: 300,  // Увеличенный размер
+                height: 300, // Увеличенный размер
+                colorDark: "#000000",
+                colorLight: "#ffffff",
+                correctLevel: QRCode.CorrectLevel.H
+            });
+        } catch (error) {
+            console.error('Ошибка создания QR-кода:', error);
+            qrcodeContainer.innerHTML = '<div style="color: red;">Ошибка создания QR-кода</div>';
+        }
+    }
+
+    // Асинхронная генерация QR-кода и отображение ID
+    async function generateQRCodeAndDisplayId() {
+        try {
+            const studentId = await fetchStudentId();
+            currentStudentId = studentId;
+            
+            // Отображаем ID клиента
+            displayClientId(studentId);
+            
+            // Создаем QR-код
+            recreateQRCode(studentId);
+        } catch (error) {
+            console.error('Ошибка:', error);
+            show_message(error.message, '-');
+            const clientIdDisplay = document.getElementById('client_id_display');
+            if (clientIdDisplay) {
+                clientIdDisplay.textContent = 'ID не доступен';
+            }
+            const qrcodeContainer = document.getElementById('qrcode');
+            if (qrcodeContainer) {
+                qrcodeContainer.innerHTML = '<div style="color: #ff4444; padding: 20px; text-align: center;">❌ Ошибка загрузки QR-кода</div>';
+            }
+        }
+    }
+
+    // Запускаем генерацию QR-кода и отображение ID
+    generateQRCodeAndDisplayId();
+    // ==========================================================
+
+    // Состояние QR-кода
+    let is_active = false
+
+    // Сам QR-код и его родитель в виде DOMElement
+    const qrcode = document.getElementById('qrcode');
+    const qrcode_container = document.getElementById('qrcode_container')
+
+    // DOMElement контейнер для корзины и заказа
+    const dishes_page_basket = document.getElementById('dishes_page_basket');
+    const dishes_page_order = document.getElementById('dishes_page_order')
+
+    // Сегодняшняя дата
+    const now = new Date();
+
+    // Кнопки для взаимодействия с корзиной и заказом: удаление и добавление заказа
+    const remove_order = document.getElementById('remove_order')
+    const set_order = document.getElementById('set_order')
+    
+    // Обработчик для клика на QR-код (увеличение при клике)
+    if (qrcode) {
+        qrcode.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (is_active) {
+                qrcode.style.transform = 'scale(1)';
+                qrcode.style.transition = 'transform 0.3s ease';
+                is_active = false;
+            } else {
+                qrcode.style.transform = 'scale(1.5)';
+                qrcode.style.transition = 'transform 0.3s ease';
+                qrcode.style.zIndex = '1000';
+                is_active = true;
+            }
+        });
+    }
+
+    // Обработчик клика по документу для скрытия увеличенного QR-кода
+    document.addEventListener('click', (e) => {
+        if (is_active && qrcode && !qrcode.contains(e.target)) {
+            qrcode.style.transform = 'scale(1)';
+            is_active = false;
+        }
+    });
+
+    // Логика свайпов (остаётся без изменений)
+    let startX = 0;
+    let startY = 0;
+    let currentPage = 0;
+    const totalPages = 2;
+    
+    const buttons = document.querySelectorAll('#menu_dishes button');
+    const title_chapter = document.querySelector('h1');
+
+    const swipeContent = document.getElementById('dishes_swipe_content');
+    const pages = document.querySelectorAll('.dishes-page');
+    const swipeContainer = document.getElementById('dishes_swipe_container');
+
+    async function goToPage(pageIndex, direction = 'none') {
+        if (pageIndex < 0 || pageIndex >= totalPages) return;
+        swipeContent.style.transform = `translateX(-${pageIndex * 50}%)`;
+        const buttonIds = ['btn_first_dish', 'btn_second_dish'];
+        const button = document.getElementById(buttonIds[pageIndex]);
+        activateButton(button, buttons, title_chapter);
+
+        if (pageIndex) {
+            await update_order_page();
+            if(now.getHours() < 24 && dishes_page_order.innerHTML !== ''){
+                remove_order.style.display = 'block';
+            } else {
+                remove_order.style.display = 'none';
+            }
+        } else {
+            await update_basket_page();
+            if(now.getHours() < 24 && dishes_page_basket.innerHTML !== ''){
+                set_order.style.display = 'block';
+            } else {
+                set_order.style.display = 'none';
+            }
+        }
+        currentPage = pageIndex;
+    }
+
+    // Обработчики свайпов
+    swipeContainer.addEventListener('touchstart', (e) => {
+        startX = e.touches[0].clientX;
+        startY = e.touches[0].clientY;
+    });
+
+    swipeContainer.addEventListener('touchend', (e) => {
+        const diffX = startX - e.changedTouches[0].clientX;
+        const diffY = startY - e.changedTouches[0].clientY;
+        if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 50) {
+            if (diffX > 0) {
+                goToPage(currentPage + 1, 'left');
+            } else {
+                goToPage(currentPage - 1, 'right');
+            }
+        }
+    });
+
+    function handleCategoryClick(button) {
+        const pageIndex = Array.from(buttons).indexOf(button);
+        const direction = pageIndex > currentPage ? 'left' : 'right';
+        goToPage(pageIndex, direction);
+    }
+
+    buttons.forEach(button => {
+        button.addEventListener('click', () => handleCategoryClick(button));
+    });
+
+    document.addEventListener('DOMContentLoaded', authRequired('student')(() => {
+        goToPage(0);
+    }));
+
+    // Функции для отображения карточек блюд (без изменений)
+    async function update_basket_page() {
+        qrcode_container.style.display = 'none'
+        dishes_page_order.innerHTML = ''
+        remove_order.style.display = 'none';
+        dishes_page_basket.style.display = 'block';
+ 
+        try {
+            const response = await fetch(`/api/basket/dish`, {
+                method: 'GET',
+                credentials: 'include'
+            });
+
+            if (!response.ok) {throw new Error(`HTTP error!`);}
+            const data = await response.json();
+            const dishes = data.dishes || [];
+            updating_dish_card(dishes_page_basket, dishes, 'dish_card_in_basket')
+            updateOrderTotalPrice(dishes_page_basket);
+        } catch (error) {
+            console.error(error);
+            show_message('Ошибка загрузки', '-')
+        }
+    }
+
+    async function update_order_page() {
+        qrcode_container.style.display = 'flex'
+        dishes_page_order.style.display = 'block'
+        set_order.style.display = 'none';
+        dishes_page_basket.innerHTML = ''
+
+        try {
+            const response = await fetch(`/api/orders/order`, {
+                method: 'GET',
+                credentials: 'include'
+            });
+
+            if (!response.ok) {throw new Error(`HTTP error!`);}
+            const data = await response.json();
+            const dishes = data.Orders
+            updating_dish_card(dishes_page_order, dishes, 'dishes_container_const_amount')
+            updateOrderTotalPrice(dishes_page_order);
+            
+            // Обновляем QR-код при загрузке страницы заказа
+            if (currentStudentId) {
+                recreateQRCode(currentStudentId);
+            } else {
+                await generateQRCodeAndDisplayId();
+            }
+        } catch (error) {
+            console.error(error);
+            show_message('Ошибка загрузки', '-')
+        }
+    }
+
+    set_order.addEventListener('click', async () => {
+        try {
+            const response = await fetch(`/api/orders/order`, {
+                method: 'POST',
+                credentials: 'include'
+            });
+
+            if (!response.ok) { throw new Error(`HTTP error!`); }
+            show_message('Заказ сформирован', '+')
+            dishes_page_basket.innerHTML = ''
+            updateOrderTotalPrice(dishes_page_basket)
+            set_order.style.display = 'none'
+        } catch (error) {
+            console.error(error)
+            show_message('Ваш заказ уже сформирован или количество активных блюд меньше чем у вас в корзине', '-', 3500)
+        }
+    });
+
+    remove_order.addEventListener('click', async () => {
+        try {
+            const response = await fetch(`/api/orders/order`, {
+                method: 'DELETE',
+                credentials: 'include'
+            });
+
+            if (!response.ok) { throw new Error(`HTTP error!`); }
+            show_message('Заказ отменен', '+')
+            dishes_page_order.innerHTML = ''
+            updateOrderTotalPrice(dishes_page_order)
+            remove_order.style.display = 'none'
+        } catch (error) {
+            console.error(error);
+            show_message('Ошибка отмены заказа', '-')
+        }
+    });
+
+    // Дебаунс для обновления количества (без изменений)
+    let updateTimeout;
+    dishes_page_basket.addEventListener('click', (e) => {
+        const counterBtn = e.target.closest('.counter_plus, .counter_minus');
+        if (!counterBtn) return;
+        const card = counterBtn.closest('.card_dish');
+        if (!card) return;
+        clearTimeout(updateTimeout);
+        updateTimeout = setTimeout(async () => {
+            try {
+                const amount = card.querySelector('.counter_value');
+                const requestData = {
+                    dish_id: card.dataset.dishId,
+                    cart_quantity: amount.textContent
+                };
+                const response = await fetch(`/api/basket/quantity`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify(requestData)
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    if (data.detail && data.detail.includes('Too many dishes')) {
+                        throw new Error(`Для корзины превышено количество блюд`);
+                    }
+                    throw new Error(`HTTP error!`);
+                }
+            } catch (error) {
+                show_message(error.message, '-');
+            }
+        }, 2000);
+    });
+
+    // Удаление блюда из корзины (без изменений)
+    dishes_page_basket.addEventListener('click', async (e) => {
+        const card = e.target.closest('.card_dish');
+        if (e.target.closest('.dell_basket')) {
+            try{
+                const response = await fetch(`/api/basket/dish?dish_id=${card.dataset.dishId}`, {
+                    method: 'DELETE',
+                    credentials: 'include',
+                });
+                if (!response.ok) {throw new Error(`HTTP error!`);}
+                card.remove()
+                updateOrderTotalPrice(dishes_page_basket)
+                if (dishes_page_basket.innerHTML === ''){
+                    set_order.style.display = 'none'
+                }
+            }
+            catch (error){
+                console.error(error)
+                show_message('Ошибка удаления', '-');
+            }
+        }
+    })
+
+    creating_application_elements()
+</script>
+
+<style>
+    /* Простые стили для отображения ID клиента и QR-кода */
+    #qrcode_wrapper {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 15px;
+        padding: 20px;
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    
+    #qrcode {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        cursor: pointer;
+        transition: transform 0.3s ease;
+    }
+    
+    #qrcode canvas,
+    #qrcode img {
+        max-width: 100%;
+        height: auto;
+        display: block;
+    }
+    
+    #client_id_display {
+        font-size: 16px;
+        font-weight: normal;
+        color: #333;
+        background: white;
+        padding: 8px 16px;
+        border-radius: 4px;
+        font-family: monospace;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    
+    #qrcode_container {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 400px;
+        background: #f5f5f5;
+        border-radius: 8px;
+        margin: 10px;
+    }
+    
+    /* Адаптация для мобильных устройств */
+    @media (max-width: 768px) {
+        #qrcode_container {
+            min-height: 380px;
+        }
+        
+        #client_id_display {
+            font-size: 14px;
+            padding: 6px 12px;
+        }
+    }
+</style>

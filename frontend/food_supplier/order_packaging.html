@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, shrink-to-fit=no">
+    
+    <title>Планирование заказов</title>
+    
+    <link rel="stylesheet" href="../styles/styles.css">
+    <link rel="stylesheet" href="../styles/normal.css">
+
+    <style>
+        /* Уменьшаем вертикальные интервалы только на этой странице */
+        #order_packaging .mini_card {
+            margin-block: 4px !important;
+        }
+
+        #summary_container .mini_card,
+        #input_hint {
+            margin-bottom: 4px;
+        }
+
+        #summary_container .mini_card p,
+        #input_hint p {
+            margin: 0;
+            line-height: 1.1;
+            padding-top: 2px;
+            padding-bottom: 2px;
+        }
+
+        .print_actions {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin: 12px 0 18px;
+        }
+
+        .print_actions button {
+            min-width: 170px;
+        }
+
+        .print-summary-only #orders_title,
+        .print-summary-only #container_with_data_from_api,
+        .print-summary-only .mini_card:first-of-type {
+            display: none !important;
+        }
+
+        .print-orders-only #summary_title,
+        .print-orders-only #input_hint,
+        .print-orders-only #summary_container {
+            display: none !important;
+        }
+
+        @media print {
+            @page {
+                size: A4;
+                margin: 5mm;
+            }
+
+            body {
+                background: #fff !important;
+                color: #000 !important;
+            }
+
+            header,
+            #div_logo,
+            #menuToggle,
+            #settings,
+            .description_form,
+            .print_actions,
+            #menu,
+            .error_message {
+                display: none !important;
+            }
+
+            h1 {
+                font-size: 18px;
+                margin: 0 0 10px 0;
+                text-align: center;
+            }
+
+            h2 {
+                margin: 10px 0 6px 0;
+                font-size: 14px;
+            }
+
+            /* ПЕЧАТЬ ТОЛЬКО СВОДКИ */
+            .print-summary-only #input_hint,
+            .print-summary-only #summary_container .mini_card {
+                display: grid !important;
+                grid-template-columns: 1fr 80px 40px;
+                align-items: center;
+                margin: 0 !important;
+                border: 1px solid #000 !important;
+                border-bottom: none !important;
+                border-radius: 0 !important;
+                background: #fff !important;
+                box-shadow: none !important;
+                min-height: auto !important;
+                width: 100% !important;
+                position: relative;
+            }
+
+            .print-summary-only #summary_container .mini_card:last-child {
+                border-bottom: 1px solid #000 !important;
+            }
+
+            .print-summary-only #input_hint {
+                font-weight: 700;
+                border-top: 1px solid #000 !important;
+            }
+
+            .print-summary-only #summary_container .mini_card p,
+            .print-summary-only #input_hint p {
+                margin: 0 !important;
+                padding: 6px 8px !important;
+                line-height: 1.1 !important;
+                font-size: 12px !important;
+                border-right: 1px solid #000 !important;
+            }
+
+            .print-summary-only #summary_container .mini_card p:last-child,
+            .print-summary-only #input_hint p:last-child {
+                text-align: center;
+                width: auto;
+            }
+
+            .print-summary-only #summary_container .mini_card::after,
+            .print-summary-only #input_hint::after {
+                content: "☐";
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                height: 100%;
+                font-size: 16px;
+                border-left: 1px solid #000;
+            }
+
+            .print-summary-only #input_hint::after {
+                content: "✓";
+                font-size: 14px;
+                font-weight: 700;
+            }
+
+            /* ПЕЧАТЬ ТОЛЬКО ЗАКАЗОВ */
+            .print-orders-only #container_with_data_from_api {
+                display: grid !important;
+                grid-template-columns: 1fr 1fr;
+                gap: 0mm;
+            }
+            .print-orders-only .student_order {
+                display: inline-block;
+                width: 100%;
+                margin: 0 0 8px 0 !important;
+                break-inside: avoid;
+                page-break-inside: avoid;
+                border: 1px solid #bbb;
+                border-radius: 6px;
+                padding: 6px;
+                box-sizing: border-box;
+            }
+
+            .print-orders-only .title_student_order {
+                margin-bottom: 3px;
+                text-align: center;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                border-bottom: 2px solid #000;
+                padding-bottom: 4px;
+            }
+
+            /* ===== ВАЖНО: УВЕЛИЧИВАЕМ ID КЛИЕНТА ===== */
+            .print-orders-only .title_student_order p {
+                margin: 0;
+                font-size: 16px !important;
+                font-weight: 700 !important;
+                color: #000 !important;
+                text-align: center;
+            }
+
+            .print-orders-only .title_student_order button,
+            .print-orders-only .title_student_order .btn_for_records,
+            .print-orders-only .title_student_order img,
+            .print-orders-only .title_student_order svg {
+                display: none !important;
+            }
+
+            .print-orders-only .dishes_of_student_order {
+                display: block !important;
+            }
+
+            .print-orders-only .dishes_of_student_order > div {
+                display: grid;
+                grid-template-columns: 1fr 34px 52px;
+                gap: 6px;
+                padding: 2px 0;
+                border-bottom: 1px solid #e3e3e3;
+            }
+
+            .print-orders-only .dishes_of_student_order > div:last-child {
+                border-bottom: none;
+            }
+
+            .print-orders-only .dishes_of_student_order p {
+                margin: 0;
+                font-size: 10px;
+                line-height: 1.05;
+            }
+        }
+    </style>
+</head>
+
+<body id="order_packaging">
+    <input type="checkbox" id="menuToggle" class="checkbox">
+    
+    <div id="div_logo">
+        <img src="../png/logo_with_text.png" alt="">
+    </div>
+    
+    <header>
+        <a href="./meal_planning.html"><img src="../png/dishes_date.png" alt="Картинка"></a>
+        <a href="./order_packaging.html"><img id="order_packaging_img" src="../png/order_packaging.png" alt="Картинка"></a>
+        <label for="menuToggle">
+            <img id="settings" src="../png/settings.png" alt="Настройки">
+        </label>
+    </header>
+
+    <h1>Упаковка заказов</h1>
+
+    <p class="description_form">
+        Данный раздел предназначен для организации и управления процессом упаковки
+        индивидуальных заказов учащихся на следующий учебный день.
+    </p>
+
+    <div class="mini_card">
+        <p>Заведение</p>
+        <select id="selection">
+            <option value="" disabled selected>Название</option>
+        </select>
+    </div>
+
+    <div class="print_actions">
+        <button class="basic_button" id="print_summary_btn" type="button">Печать сводки</button>
+        <button class="basic_button" id="print_orders_btn" type="button">Печать заказов</button>
+    </div>
+
+    <h2 id="summary_title" style="display: none;">Сводка по блюдам</h2>
+
+    <div class="mini_card" id="input_hint" style="display: none;">
+        <p>Блюдо</p>
+        <p style="border: none;">Количество</p>
+    </div>
+
+    <div id="summary_container"></div>
+
+    <h2 id="orders_title" style="display: none;">Данные из базы</h2>
+
+    <div id="container_with_data_from_api"></div>
+</body>
+</html>
+
+<script type="module" defer>
+    import {
+        show_message,
+        authRequiredAsync,
+        creating_application_elements, 
+    } from '../js/export.js'
+
+    import { createDropDownMenuCard } from '../js/drop_down_menu_card.js'
+
+    const selection = document.getElementById('selection')
+
+    const institutions = {}
+    const container_with_data_from_api = document.getElementById('container_with_data_from_api')
+    const summary_container = document.getElementById('summary_container')
+
+    const summary_title = document.getElementById('summary_title')
+    const orders_title = document.getElementById('orders_title')
+    const input_hint = document.getElementById('input_hint')
+
+    const print_summary_btn = document.getElementById('print_summary_btn')
+    const print_orders_btn = document.getElementById('print_orders_btn')
+
+    function buildDishSummary(data) {
+        const summary = {}
+
+        Object.values(data).forEach(order => {
+            if (!Array.isArray(order)) return
+
+            order.forEach(item => {
+                if (!item || !item.dish_name) return
+
+                const dishName = item.dish_name.trim()
+                const quantity = Number(item.quantity) || 0
+
+                if (!summary[dishName]) {
+                    summary[dishName] = 0
+                }
+
+                summary[dishName] += quantity
+            })
+        })
+
+        return summary
+    }
+
+    function renderDishSummary(summary, container) {
+        const entries = Object.entries(summary)
+            .sort((a, b) => a[0].localeCompare(b[0], 'ru'))
+
+        if (!entries.length) {
+            container.innerHTML = `
+                <p style="text-align:center; padding:20px;">
+                    Нет сводных данных
+                </p>
+            `
+            return
+        }
+
+        container.innerHTML = entries.map(([dishName, quantity]) => `
+            <div class="mini_card">
+                <p>${dishName}</p>
+                <p>${quantity}</p>
+            </div>
+        `).join('')
+    }
+
+    function resetView() {
+        summary_title.style.display = 'none'
+        orders_title.style.display = 'none'
+        input_hint.style.display = 'none'
+        summary_container.innerHTML = ''
+        container_with_data_from_api.innerHTML = ''
+    }
+
+    async function loadOrdersByInstitution() {
+        try {
+            const institution_id = institutions[selection.value]
+
+            if (!institution_id) {
+                throw new Error('Заведение не выбрано')
+            }
+
+            const response = await fetch(`/api/orders/orders?institution_id=${institution_id}`, {
+                method: 'GET',
+                credentials: 'include'
+            })
+
+            if (!response.ok) {
+                throw new Error('Ошибка при загрузке заказов')
+            }
+
+            const data = (await response.json()).Orders || {}
+
+            if (Object.keys(data).length === 0) {
+                resetView()
+                container_with_data_from_api.innerHTML = `
+                    <p style="text-align: center; padding: 20px;">
+                        Нет данных на завтра
+                    </p>
+                `
+                return
+            }
+
+            summary_title.style.display = 'flex'
+            orders_title.style.display = 'flex'
+            input_hint.style.display = 'flex'
+
+            const summary = buildDishSummary(data)
+            renderDishSummary(summary, summary_container)
+
+            createDropDownMenuCard(data, container_with_data_from_api)
+
+            setTimeout(() => {
+                document.querySelectorAll('.dishes_of_student_order').forEach(block => {
+                    block.style.display = 'block'
+                })
+            }, 0)
+        }
+        catch (error) {
+            console.error(error)
+            resetView()
+            show_message(error.message || error, false)
+        }
+    }
+
+    function printSummaryOnly() {
+        document.body.classList.add('print-summary-only')
+        window.print()
+        setTimeout(() => {
+            document.body.classList.remove('print-summary-only')
+        }, 300)
+    }
+
+    function printOrdersOnly() {
+        document.body.classList.add('print-orders-only')
+        window.print()
+        setTimeout(() => {
+            document.body.classList.remove('print-orders-only')
+        }, 300)
+    }
+
+    document.addEventListener('DOMContentLoaded', authRequiredAsync('provider')(async () => {
+        try {
+            const response = await fetch(`/api/institution/institutions`, {
+                method: 'GET',
+                credentials: 'include'
+            })
+
+            const data = (await response.json()).Institutions || []
+
+            data.forEach(element => {
+                selection.innerHTML += `<option>${element.name}</option>`
+                institutions[element.name] = element.id
+            })
+
+            resetView()
+        }
+        catch (error) {
+            console.log(error)
+            show_message(error.message || error, false)
+        }
+    }))
+
+    selection.addEventListener('change', loadOrdersByInstitution)
+    print_summary_btn.addEventListener('click', printSummaryOnly)
+    print_orders_btn.addEventListener('click', printOrdersOnly)
+
+    creating_application_elements()
+</script>

@@ -1,0 +1,130 @@
+<!-- Самая первая страница приложения. Она запрашивает персональный ID клиента,
+ если таковой найден, то переносит наследующую страницу приложения - authentication.html -->
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    <title>Столовая</title>
+    
+    <link rel="stylesheet" href="./styles/styles.css">
+    <link rel="stylesheet" href="./styles/normal.css">
+
+    <!-- Yandex.Metrika counter -->
+    <script type="text/javascript">
+        (function(m,e,t,r,i,k,a){
+            m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+            m[i].l=1*new Date();
+            for (var j = 0; j < document.scripts.length; j++) {if (document.scripts[j].src === r) { return; }}
+            k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)
+        })(window, document,'script','https://mc.yandex.ru/metrika/tag.js?id=106329665', 'ym');
+
+        ym(106329665, 'init', {ssr:true, webvisor:true, clickmap:true, ecommerce:"dataLayer", accurateTrackBounce:true, trackLinks:true});
+    </script>
+    <noscript><div><img src="https://mc.yandex.ru/watch/106329665" style="position:absolute; left:-9999px;" alt="" /></div></noscript>
+    <!-- /Yandex.Metrika counter -->
+</head>
+<body id="enter_page_1">
+    <img id="logo" src="./png/logo_with_full_text.png" alt="Воскресенский колледж">
+
+    <h1>Столовая</h1>
+
+    <div class="slanted_line"></div>
+
+    <form>
+        <p>Введите ваш email. При возникновении вопросов обратитесь к администрации учебного заведения.</p>
+        <input
+            id="input_id"
+            name="student_card_id"
+            placeholder="Email"
+            minlength="5"
+            maxlength="50"
+            type="text"
+            required
+            autofocus>
+        <button class="basic_button" type="submit" id="submitButton">Продолжить</button>
+    </form>
+</body>
+</html>
+
+<script type="module" defer>
+    import {
+        show_message,
+        setCookie,
+        getCookie,
+        rights_verification,
+        create_message,
+        set_font_size
+    } from './js/export.js'
+
+    set_font_size() // Установка размера шрифта из куки
+    create_message() // Создание DOM-элемента для фидбэка
+    
+    // Если JWT токен уже присутствует у клиента, то перенаправление на страницу его роли
+    const userToken = getCookie('user_token')
+    if (userToken){
+        rights_verification(userToken)
+    }
+
+    let DOM = null;
+
+    document.addEventListener('DOMContentLoaded', () => {
+        DOM = {
+            form: document.querySelector('form'),
+            input: document.getElementById('input_id'),
+            submitButton: document.getElementById('submitButton'),
+            errorMessage: document.querySelector('.error_message_text')
+        };
+        
+        if (DOM.form) {
+            DOM.form.addEventListener('submit', handleSubmit);
+        }
+    })
+
+
+    async function handleSubmit(e) {
+        e.preventDefault();
+
+        show_message('Отправка данных ...')
+
+        // Отключение кнопки отправки
+        DOM.submitButton.disabled = true
+        
+        try {
+            const studentId = DOM.input.value.trim();
+            
+            if (!studentId || studentId.length < 5 || studentId.length > 50) {
+                throw new Error('ID минимум 3 символа, максимум 12');
+            }
+
+            console.log(studentId)
+            
+            const response = await fetch(`/api/auth/generate?email=${encodeURIComponent(studentId)}`, {
+                method: 'POST'
+            });
+
+            if (!response.ok) {
+                if (response.status === 404) {
+                    throw new Error('Пользователь не найден');
+                } else if (response.status === 400) {
+                    throw new Error('Неверный формат ID');
+                }
+            }
+            
+            const data = await response.json();
+
+            console.log(data)
+            
+            setCookie('user_authentication', data, 15 / (24 * 60))
+
+            window.location.href = './authentication.html';
+            
+        } catch (error) {
+            console.error(error);
+            show_message(error.message || 'Неверный id')
+        }
+
+        DOM.submitButton.disabled = false
+    }
+</script>
