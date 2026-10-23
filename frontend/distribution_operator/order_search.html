@@ -54,17 +54,14 @@
         <button class="basic_button" type="button" id="close_order">Закрыть заказ</button>
         <button class="basic_button" type="button" id="back_to">Отменить операцию</button>
     </div>
-</body>
-</html>
-
-<script type="module" defer>
+<script type="module">
     import {
         show_message,
         updateOrderTotalPrice,
         authRequired,
         creating_application_elements, 
         check_student_id
-    } from '../js/export.js'
+    } from '../js/common.js'
 
     import { updating_dish_card } from '../js/meal_cards.js'
 
@@ -243,3 +240,5 @@
 
     creating_application_elements();
 </script>
+</body>
+</html>

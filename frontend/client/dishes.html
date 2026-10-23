@@ -69,18 +69,16 @@
         <p style="visibility: hidden;">Здесь может быть какая-то</p>
     </footer>
 
-<script src="https://cdn.jsdelivr.net/npm/davidshimjs-qrcodejs@0.0.2/qrcode.min.js"></script>
-<script type="module" defer>
+<script src="../js/vendor/qrcode.min.js"></script>
+<script type="module">
     import { updating_dish_card } from '../js/meal_cards.js';
     import {
         show_message,
         authRequired,
         activateButton,
         creating_application_elements,
-        getCookie,
-        updateOrderTotalPrice,
-        parseJwtModern
-    } from '../js/export.js';
+        updateOrderTotalPrice
+    } from '../js/common.js';
 
     const ROUTES = {
         DISHES: 'dishes',
@@ -432,18 +430,6 @@
     }
 
     async function fetchStudentId() {
-        try {
-            const token = getCookie('access_token');
-            if (token) {
-                const payload = parseJwtModern(token);
-                if (payload && payload.student_id) {
-                    return payload.student_id;
-                }
-            }
-        } catch (e) {
-            console.log('Не удалось получить ID из токена:', e);
-        }
-        
         const response = await fetch('/api/orders/order', {
             method: 'GET',
             credentials: 'include'

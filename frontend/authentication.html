@@ -27,18 +27,16 @@
         <button id="submitButton" class="basic_button" type="submit">Войти</button>
         <a href="./index.html">Вернуться назад</a>
     </form>
-</body>
-</html>
-
-<script type="module" defer>
+<script type="module">
     import {
         show_message,
-        setCookie,
-        getCookie,
+        setStored,
+        getStored,
         rights_verification,
+        parseJwtModern,
         create_message,
         set_font_size
-    } from './js/export.js'
+    } from './js/common.js'
 
     set_font_size()
     create_message()
@@ -71,46 +69,51 @@
                 throw new Error('Код должен состоять из 6 цифр');
             }
 
-            const user_authentication = getCookie('user_authentication')
+            const user_authentication = getStored('user_authentication')
             
             if (!user_authentication) {
-                window.location.href = './index.html'
+                window.location.href = './login.html'
+                return
             }
 
-            console.log(user_authentication)
-            console.log(sms)
-            
             const response = await fetch(
                 `/api/auth/confirm?` +
-                `user_id=${user_authentication.user_id}&` +
-                `temporary_code_id=${user_authentication.tmp_code_id}&` +
-                `code=${sms}`, 
+                `user_id=${encodeURIComponent(user_authentication.user_id)}&` +
+                `temporary_code_id=${encodeURIComponent(user_authentication.tmp_code_id)}&` +
+                `code=${encodeURIComponent(sms)}`, 
                 {
                     method: 'POST',
                     credentials: 'include'
                 }
             );
 
-            const data = await response.json();
-
-            console.log(data)
+            const data = await response.json().catch(() => ({}));
+            const detail = String(data.detail || '');
 
             if (!response.ok) {
-                if (data.detail.includes('Code expired') || data.detail.includes('Code already used')) {
-                    throw new Error('Код неправильный или истек. Запросите новый код.');
+                if (detail.includes('Code expired') || detail.includes('Code already used')) {
+                    throw new Error('Код истек или уже использован. Запросите новый код.');
+                } else if (detail.includes('Incorrect code')) {
+                    throw new Error('Неверный код');
+                } else if (response.status === 429) {
+                    throw new Error('Слишком много попыток. Попробуйте позже.');
                 } else {
                     throw new Error(`Ошибка сервера: ${response.status}`);
                 }
             }
 
-            setCookie('user_token', data.access_token, 5)
-            rights_verification(data.access_token)  
+            // JWT живёт только в HttpOnly-cookie; в localStorage храним лишь роль для маршрутизации
+            const role = data.role || (parseJwtModern(data.access_token) || {}).role
+            setStored('user_role', role, 30)
+            rights_verification(role)
             
         } catch (error) {
             console.error(error);
-            show_message(error.message || 'Неверный id', '-')
+            show_message(error.message || 'Ошибка входа', '-')
         }
 
         DOM.submitButton.disabled = false
     }
 </script>
+</body>
+</html>

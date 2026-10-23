@@ -218,3 +218,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Prepros (локальные настройки сборщика)
+prepros.config*
+
+# сертификаты и данные certbot
+nginx/ssl/
+certbot/

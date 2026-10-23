@@ -247,15 +247,13 @@
     <h2 id="orders_title">Заказы по ученикам</h2>
 
     <div id="container_with_data_from_api"></div>
-</body>
-</html>
-
-<script type="module" defer>
+<script type="module">
     import {
         show_message,
         authRequiredAsync,
+        escapeData,
         creating_application_elements
-    } from '../js/export.js'
+    } from '../js/common.js'
 
     import { createDropDownMenuCard } from '../js/drop_down_menu_card.js'
 
@@ -313,7 +311,7 @@
 
         container.innerHTML = entries.map(([dishName, quantity]) => `
             <div class="mini_card">
-                <p>${dishName}</p>
+                <p>${escapeData(dishName)}</p>
                 <p>${quantity}</p>
             </div>
         `).join('');
@@ -404,3 +402,5 @@
         creating_application_elements();
     });
 </script>
+</body>
+</html>

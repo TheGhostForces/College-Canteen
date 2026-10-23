@@ -30,10 +30,8 @@
             <button class="basic_button" type="button" id="webBtn" style="width: 280px; margin: 0; background-color: #6c757d;">Продолжить в веб-версии</button>
         </div>
     </form>
-</body>
-</html>
-<script type="module" defer>
-    import { set_font_size, create_message } from './js/export.js'
+<script type="module">
+    import { set_font_size, create_message } from './js/common.js'
     set_font_size()
     create_message()
     const isAndroid = /android/i.test(navigator.userAgent);
@@ -62,3 +60,5 @@
     const isInApp = /voscollege/i.test(navigator.userAgent) || window.location.href.includes('app=');
     if (isInApp) { window.location.href = '/login.html'; }
 </script>
+</body>
+</html>

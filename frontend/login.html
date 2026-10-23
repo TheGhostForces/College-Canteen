@@ -45,26 +45,23 @@
             autofocus>
         <button class="basic_button" type="submit" id="submitButton">Продолжить</button>
     </form>
-</body>
-</html>
-
-<script type="module" defer>
+<script type="module">
     import {
         show_message,
-        setCookie,
-        getCookie,
+        setStored,
+        getStored,
         rights_verification,
         create_message,
         set_font_size
-    } from './js/export.js'
+    } from './js/common.js'
 
     set_font_size() // Установка размера шрифта из куки
     create_message() // Создание DOM-элемента для фидбэка
     
     // Если JWT токен уже присутствует у клиента, то перенаправление на страницу его роли
-    const userToken = getCookie('user_token')
-    if (userToken){
-        rights_verification(userToken)
+    const userRole = getStored('user_role')
+    if (userRole){
+        rights_verification(userRole)
     }
 
     let DOM = null;
@@ -95,11 +92,9 @@
             const studentId = DOM.input.value.trim();
             
             if (!studentId || studentId.length < 5 || studentId.length > 50) {
-                throw new Error('ID минимум 3 символа, максимум 12');
+                throw new Error('Введите корректный email');
             }
 
-            console.log(studentId)
-            
             const response = await fetch(`/api/auth/generate?email=${encodeURIComponent(studentId)}`, {
                 method: 'POST'
             });
@@ -107,16 +102,18 @@
             if (!response.ok) {
                 if (response.status === 404) {
                     throw new Error('Пользователь не найден');
-                } else if (response.status === 400) {
-                    throw new Error('Неверный формат ID');
+                } else if (response.status === 400 || response.status === 422) {
+                    throw new Error('Неверный формат email');
+                } else if (response.status === 429) {
+                    const err = await response.json().catch(() => ({}));
+                    throw new Error(String(err.detail || 'Слишком много запросов, попробуйте позже'));
                 }
+                throw new Error('Не удалось отправить код, попробуйте позже');
             }
             
             const data = await response.json();
 
-            console.log(data)
-            
-            setCookie('user_authentication', data, 15 / (24 * 60))
+            setStored('user_authentication', data, 15 / (24 * 60))
 
             window.location.href = './authentication.html';
             
@@ -128,3 +125,5 @@
         DOM.submitButton.disabled = false
     }
 </script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-import { updateOrderTotalPrice, escapeData } from './export.js'
+import { updateOrderTotalPrice, escapeData } from './common.js'
 
 class CardDishClass {
     /**

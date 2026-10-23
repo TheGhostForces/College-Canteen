@@ -258,15 +258,13 @@
     <h2 id="orders_title" style="display: none;">Данные из базы</h2>
 
     <div id="container_with_data_from_api"></div>
-</body>
-</html>
-
-<script type="module" defer>
+<script type="module">
     import {
         show_message,
         authRequiredAsync,
+        escapeData,
         creating_application_elements, 
-    } from '../js/export.js'
+    } from '../js/common.js'
 
     import { createDropDownMenuCard } from '../js/drop_down_menu_card.js'
 
@@ -321,7 +319,7 @@
 
         container.innerHTML = entries.map(([dishName, quantity]) => `
             <div class="mini_card">
-                <p>${dishName}</p>
+                <p>${escapeData(dishName)}</p>
                 <p>${quantity}</p>
             </div>
         `).join('')
@@ -412,7 +410,7 @@
             const data = (await response.json()).Institutions || []
 
             data.forEach(element => {
-                selection.innerHTML += `<option>${element.name}</option>`
+                selection.append(new Option(element.name))
                 institutions[element.name] = element.id
             })
 
@@ -430,3 +428,5 @@
 
     creating_application_elements()
 </script>
+</body>
+</html>
