@@ -1,0 +1,53 @@
+# Отдельный локальный стек: не требует .env, домена, TLS и почтового сервиса.
+# Запуск: docker compose -f docker-compose.local.yml up -d --build
+name: college-canteen-local
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: canteen_local
+      POSTGRES_PASSWORD: canteen_local
+      POSTGRES_DB: canteen_local
+    volumes:
+      - local_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U canteen_local -d canteen_local"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+  app:
+    build: ./server
+    environment:
+      POSTGRES_USER: canteen_local
+      POSTGRES_PASSWORD: canteen_local
+      POSTGRES_DB: canteen_local
+      POSTGRES_HOST: postgres
+      SECRET_KEY: local-development-only-secret-key-not-for-production
+      COOKIE_SECURE: "false"
+      ENABLE_DOCS: "true"
+      API_ROOT_PATH: /api
+      MAIL_BACKEND: console
+      CORS_ORIGINS: '[]'
+    command: sh -c "alembic upgrade head && python -m app.seed && exec python -m app"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./server/img:/app/img:ro
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "127.0.0.1:${LOCAL_PORT:-8080}:80"
+    volumes:
+      - ./nginx/nginx.local.conf:/etc/nginx/nginx.conf:ro
+      - ./frontend:/usr/share/nginx/html:ro
+      - ./server/img:/usr/share/nginx/img:ro
+    depends_on:
+      app:
+        condition: service_healthy
+
+volumes:
+  local_postgres_data:

@@ -5,6 +5,7 @@
 """
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field, SecretStr, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -26,13 +27,15 @@ class Settings(BaseSettings):
     access_token_ttl_days: int = Field(30, ge=1)
     cookie_secure: bool = True
 
-    # --- Почта (отправка кодов входа через Resend) ---
+    # --- Почта (console только для локальной разработки: коды выводятся в лог) ---
+    mail_backend: Literal["resend", "console"] = "resend"
     resend_api_key: SecretStr | None = None
     mail_from: str | None = None
 
     # --- Прочее ---
     timezone: str = "Europe/Moscow"
     enable_docs: bool = False
+    api_root_path: str = ""
     cors_origins: list[str] = ["https://voscollege.ru", "https://www.voscollege.ru"]
 
     # --- Бизнес-правила ---

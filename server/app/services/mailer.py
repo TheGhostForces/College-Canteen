@@ -1,4 +1,6 @@
-"""Отправка писем через Resend."""
+"""Отправка писем через Resend или вывод кодов в лог при локальной разработке."""
+
+import logging
 
 import resend
 
@@ -8,6 +10,10 @@ from app.core.config import get_settings
 def send_login_code(email: str, code: str) -> None:
     """Синхронная отправка; из async-кода вызывать через asyncio.to_thread."""
     settings = get_settings()
+    if settings.mail_backend == "console":
+        logging.getLogger("canteen.mailer").warning("LOCAL LOGIN CODE | %s | %s", email, code)
+        return
+
     if settings.resend_api_key is None or not settings.mail_from:
         raise RuntimeError("Email sender is not configured (RESEND_API_KEY / MAIL_FROM)")
 

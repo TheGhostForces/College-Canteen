@@ -60,7 +60,74 @@ Python 3.13, FastAPI, SQLAlchemy 2 (async) + asyncpg, PostgreSQL 15, Alembic, Py
 (бросает доменные ошибки из `app.core.exceptions`, ничего не знает про HTTP) → обработчик в `main.py` превращает
 ошибку в ответ `{"detail": "..."}`. Сессия БД создаётся на каждый HTTP-запрос и передаётся репозиториям через зависимости.
 
-## Быстрый старт (Docker)
+## Локальный запуск (рекомендуемый способ)
+
+Нужны Docker Engine / Docker Desktop и Docker Compose v2 или новее. Python, Node.js,
+TLS-сертификаты и аккаунт Resend на компьютере не требуются. Выполните из корня проекта:
+
+```bash
+docker compose -f docker-compose.local.yml up -d --build --wait
+```
+
+- Сайт: **http://localhost:8080**.
+- Swagger: **http://localhost:8080/api/docs** (включая выполнение запросов).
+- Проверка приложения и БД: http://localhost:8080/api/health.
+
+Первый запуск скачивает образы и зависимости, применяет миграции и создаёт демоданные:
+заведение, пользователей всех ролей, блюда и меню на завтра. Повторный запуск не сбрасывает
+данные и не восстанавливает уже заказанные порции; меню на новую дату добавляется при старте.
+
+### Как войти
+
+Откройте сайт, перейдите ко входу и укажите один из адресов:
+
+| Email | Роль |
+|-------|------|
+| `student@example.com` | студент |
+| `provider@example.com` | поставщик |
+| `operator@example.com` | оператор раздачи |
+| `admin@example.com` | администратор (работа через API, отдельной страницы нет) |
+
+Письма в локальном режиме **не отправляются**. После запроса кода посмотрите лог:
+
+```bash
+docker compose -f docker-compose.local.yml logs --tail=50 app
+# LOCAL LOGIN CODE | student@example.com | <одноразовый код>
+```
+
+Введите код на странице подтверждения. Используется обычная авторизация с одноразовым
+кодом и HttpOnly-cookie, без обхода проверки прав. Повторный запрос до истечения кода
+может использовать прежний код — ищите его в логах, а не ожидайте нового письма.
+Для админа используйте `/auth/generate` и `/auth/confirm` в Swagger.
+
+### Управление
+
+```bash
+# Состояние и логи
+docker compose -f docker-compose.local.yml ps
+docker compose -f docker-compose.local.yml logs -f app
+
+# Остановить (база сохранится)
+docker compose -f docker-compose.local.yml down
+
+# Пересобрать backend после изменений Python
+docker compose -f docker-compose.local.yml up -d --build --wait
+```
+
+HTML/CSS/JS подключены с компьютера: после изменения достаточно обновить страницу.
+Если порт 8080 занят, задайте `LOCAL_PORT`, например в Bash:
+`LOCAL_PORT=8081 docker compose -f docker-compose.local.yml up -d --build --wait`.
+В PowerShell сначала выполните `$env:LOCAL_PORT = '8081'`.
+
+Локальный стек имеет отдельное имя проекта и том БД, не читает настройки приложения из `.env`
+и не меняет продакшен-конфигурацию. Наружу опубликован только nginx на `127.0.0.1`.
+Для полного удаления **локальной базы** выполните
+`docker compose -f docker-compose.local.yml down -v` — это необратимо удалит её данные.
+
+**Не используйте этот compose в продакшене:** пароль БД и ключ JWT демонстрационные,
+коды входа пишутся в лог, HTTPS отключён.
+
+## Запуск в продакшене (Docker)
 
 ```bash
 cp .env.example .env

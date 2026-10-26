@@ -32,6 +32,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="College Canteen API",
         lifespan=lifespan,
+        root_path=settings.api_root_path,
         # Swagger включается только явно (ENABLE_DOCS=true), в продакшене он закрыт
         docs_url="/docs" if settings.enable_docs else None,
         redoc_url=None,
