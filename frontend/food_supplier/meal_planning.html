@@ -55,16 +55,13 @@
         <button class="basic_button" type="submit" id="approving_dishes">Утвердить</button>
         <button class="basic_button" type="submit" id="find_dishes">Найти</button>
     </div>
-</body>
-</html>
-
-<script type="module" defer>
+<script type="module">
     import {
         show_message,
         authRequiredAsync,
         date_verification,
         creating_application_elements, 
-    } from '../js/export.js'
+    } from '../js/common.js'
 
     import { createSmallCards } from '../js/meal_mini_cards.js'
 
@@ -111,7 +108,7 @@
             const data = (await response.json()).Institutions
 
             data.forEach(element => {
-                selection.innerHTML += `<option>${element.name}</option>`
+                selection.append(new Option(element.name))
                 institutions[element.name] = element.id
             })
 
@@ -145,6 +142,9 @@
                 }
             );
 
+            if (!response.ok) {
+                throw new Error(response.status === 404 ? 'Блюда не найдены' : `Ошибка сервера: ${response.status}`)
+            }
             const data = (await response.json()).dishes
 
             createSmallCards(
@@ -188,13 +188,15 @@
                 const dish_id = element.dataset.dishId
                 const count = element.querySelector('input').value
 
-                if (!count > 0 && count <= 500) {
+                // раньше условие "!count > 0 && count <= 500" почти никогда не срабатывало
+                const quantity = Number(count)
+                if (count === '' || !Number.isInteger(quantity) || quantity < 0 || quantity > 500) {
                     throw new Error(`Неверное количество в строке ${index + 1}`)
                 }
 
                 items_for_server.push({
-                    dish_id: dish_id,
-                    cart_quantity: count
+                    dish_id: Number(dish_id),
+                    cart_quantity: quantity
                 })
             })
 
@@ -210,7 +212,8 @@
             );
 
             if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+                const err = await response.json().catch(() => ({}))
+                throw new Error(typeof err.detail === 'string' ? err.detail : `Ошибка сервера: ${response.status}`);
             }
 
             show_message(`Успешно оформлено на ${date}`, true)
@@ -229,3 +232,5 @@
 
     creating_application_elements()
 </script>
+</body>
+</html>

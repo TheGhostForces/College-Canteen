@@ -1,4 +1,4 @@
-import { escapeData } from './export.js'
+import { escapeData } from './common.js'
 
 class DropDownMenuCardClass{
     constructor(key, value) {

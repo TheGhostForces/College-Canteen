@@ -62,21 +62,16 @@
     <footer>
         <p>Здесь может быть какая-то пояснительная информация</p>
     </footer>
-</body>
-</html>
-
 <!-- Библиотека для создания QR-кода -->
-<script src="https://cdn.jsdelivr.net/npm/davidshimjs-qrcodejs@0.0.2/qrcode.min.js"></script>
-<script type="module" defer>
+<script src="../js/vendor/qrcode.min.js"></script>
+<script type="module">
     import {
         activateButton,
         show_message,
-        getCookie,
         authRequired,
         updateOrderTotalPrice,
-        creating_application_elements,
-        parseJwtModern
-    } from '../js/export.js'
+        creating_application_elements
+    } from '../js/common.js'
 
     import { updating_dish_card } from '../js/meal_cards.js'
 
@@ -87,21 +82,6 @@
 
     // Функция для получения Student_ID из API
     async function fetchStudentId() {
-        // Пробуем получить из cookie или JWT токена
-        try {
-            // Сначала пробуем получить из JWT токена
-            const token = getCookie('access_token');
-            if (token) {
-                const payload = parseJwtModern(token);
-                if (payload && payload.student_id) {
-                    return payload.student_id;
-                }
-            }
-        } catch (e) {
-            console.log('Не удалось получить ID из токена:', e);
-        }
-        
-        // Если не получилось из токена, делаем запрос к API
         const response = await fetch('/api/orders/order', {
             method: 'GET',
             credentials: 'include'
@@ -502,3 +482,5 @@
         }
     }
 </style>
+</body>
+</html>
