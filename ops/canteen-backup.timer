@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily College Canteen database backup
+
+[Timer]
+OnCalendar=*-*-* 02:15:00
+RandomizedDelaySec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -10,8 +10,8 @@
 |------|------------|
 | `student` | смотрит меню на завтра, собирает корзину, оформляет и отменяет заказ, видит историю, показывает QR оператору |
 | `provider` (поставщик) | выбирает заведение, задаёт количество порций на день, видит сколько заказано |
-| `operator` (оператор раздачи) | по QR/ID студента видит заказ **на сегодня** и отмечает его выданным; работает только со студентами своего заведения |
-| `admin` | ведёт справочник блюд своего заведения и заводит пользователей (через API) |
+| `operator` (оператор раздачи) | по подписанному краткоживущему QR видит заказ **на сегодня** и отмечает его выданным; работает только со студентами своего заведения |
+| `admin` | через `/admin/index.html` ведёт справочник блюд своего заведения и создаёт студентов, поставщиков, операторов |
 
 Вход - по одноразовому коду из письма (без паролей). Сессия хранится в HttpOnly-cookie.
 
@@ -86,7 +86,7 @@ docker compose -f docker-compose.local.yml up -d --build --wait
 | `student@example.com` | студент |
 | `provider@example.com` | поставщик |
 | `operator@example.com` | оператор раздачи |
-| `admin@example.com` | администратор (работа через API, отдельной страницы нет) |
+| `admin@example.com` | администратор, `/admin/index.html` |
 
 Письма в локальном режиме **не отправляются**. После запроса кода посмотрите лог:
 
@@ -98,7 +98,7 @@ docker compose -f docker-compose.local.yml logs --tail=50 app
 Введите код на странице подтверждения. Используется обычная авторизация с одноразовым
 кодом и HttpOnly-cookie, без обхода проверки прав. Повторный запрос до истечения кода
 может использовать прежний код — ищите его в логах, а не ожидайте нового письма.
-Для админа используйте `/auth/generate` и `/auth/confirm` в Swagger.
+После входа администратор автоматически попадает в `/admin/index.html`.
 
 ### Управление
 
@@ -129,41 +129,50 @@ HTML/CSS/JS подключены с компьютера: после измен�
 
 ## Запуск в продакшене (Docker)
 
+Подробная процедура для VPS, DNS `voscollege.ru`, TLS, резервных копий и мониторинга находится
+в [`ops/README.md`](ops/README.md). Краткая команда после настройки секретов и сертификата:
+
 ```bash
-cp .env.example .env
-# заполните POSTGRES_PASSWORD, SECRET_KEY (openssl rand -hex 32), RESEND_API_KEY, MAIL_FROM
-docker compose up -d --build
+sudo docker compose -f docker-compose.yml up -d --build --wait
 ```
 
-Приложение при старте само применяет миграции (`alembic upgrade head`). nginx ждёт сертификаты в `nginx/ssl/`
-(`fullchain.pem`, `privkey.pem`) - для продакшена, см. ниже.
+Первого администратора создавайте только серверной командой:
+
+```bash
+sudo docker compose -f docker-compose.yml exec app python -m app.bootstrap_admin \
+  --email admin@voscollege.ru --institution-name 'Название колледжа'
+```
+
+Не используйте `docker-compose.local.yml` и `app.seed` в продакшене. Перед открытием доступа
+настройте `MAIL_BACKEND=resend`, `COOKIE_SECURE=true`, `ENABLE_DOCS=false`, уникальные секреты,
+внешние backup и мониторинг.
 
 ## Локальная разработка без Docker
 
 ```bash
-# 1. PostgreSQL (например, в Docker): docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=postgres postgres:15-alpine
-# 2. зависимости
+# PostgreSQL должен быть запущен отдельно; настройки POSTGRES_* задайте в .env.
 cd server
 python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -r requirements-dev.txt
-# 3. настройки: в .env (корень проекта или server/) задайте POSTGRES_PASSWORD, SECRET_KEY, COOKIE_SECURE=false, ENABLE_DOCS=true
-# 4. миграции и запуск
+# В .env: COOKIE_SECURE=false, ENABLE_DOCS=true; MAIL_BACKEND=console только локально.
 alembic upgrade head
 python -m app                      # http://localhost:8000/docs
 ```
 
-Фронтенд ожидает API по пути `/api/` (его даёт nginx), поэтому для работы страниц удобнее поднять весь стек в Docker.
+Фронтенд ожидает API по пути `/api/`, поэтому для работы страниц проще локальный Docker Compose.
 
 ## Тесты и качество кода
 
 ```bash
 cd server
-pytest                 # нужен PostgreSQL; БД canteen_test создаётся и мигрируется автоматически
+pytest                 # только отдельная тестовая PostgreSQL БД, НЕ production!
 ruff check . && ruff format --check .
-alembic check          # проверка, что миграции соответствуют моделям (запускается и в pytest)
+alembic check
 ```
 
-Тесты и линтер запускаются в GitHub Actions (`.github/workflows/ci.yml`).
+Тесты создают и очищают БД из `POSTGRES_DB` (по умолчанию `canteen_test`).
+Не направляйте тесты в рабочую базу: фикстуры удаляют её таблицы/данные.
+CI: `.github/workflows/ci.yml`.
 
 ## Миграции
 
@@ -207,9 +216,10 @@ alembic downgrade -1
 | Меню | `GET /dishes/dishes_tomorrow` (студент); `GET/PUT /dishes/date_dishes`, `/dishes/dishes` (поставщик); `GET /dishes/date_dishes_operator` (оператор) |
 | Справочник блюд | `GET/POST/PATCH/DELETE /dishes/dish` (админ) |
 | Корзина | `GET/POST/DELETE /basket/dish`, `POST /basket/quantity` |
-| Заказы | `POST/GET/DELETE /orders/order` (студент); `GET /orders/student_order`, `PATCH /orders/order`, `GET /orders/orders_date` (оператор); `GET /orders/orders`, `/orders/total_quantity` (поставщик) |
+| Заказы | `POST/GET/DELETE /orders/order` (студент), `POST /orders/pickup_token` (QR); `POST /orders/student_order`, `PATCH /orders/order` с JSON `{pickup_token}` (оператор); `GET /orders/orders_date`, `/orders/orders`, `/orders/total_quantity` |
 | История | `GET /history/history?month=&year=` |
-| Прочее | `GET /institution/institutions`, `POST /admin/user`, `GET /health` |
+| Администрирование | `GET /admin/me`, `/admin/users?limit=25&offset=0`, `/admin/dishes`, `POST /admin/user` (только своё заведение) |
+| Прочее | `GET /institution/institutions`, `GET /health` |
 
 Имена полей в ответах (`Ok`, `Orders`, `Student_ID`...) - контракт с фронтендом и мобильным приложением, менять их нельзя.
 
@@ -221,10 +231,27 @@ alembic downgrade -1
   Если добавляете внешние скрипты/стили, расширьте CSP.
 - Лимиты запросов по IP мягкие: весь колледж может выходить в сеть с одного адреса. Защита кода входа - счётчик попыток в приложении (3 попытки на код).
 
+## Совместимость при обновлении
+
+- `/auth/generate` принимает JSON `{email}`, `/auth/confirm` — JSON
+  `{user_id, temporary_code_id, code}`. Query-only запросы больше не поддерживаются.
+- QR содержит отдельный JWT с `purpose=pickup`, срок — 5 минут; корзина обновляет его автоматически.
+  Поиск и выдача требуют JSON `{pickup_token}`, числовой ID недостаточен. Старые QR недействительны.
+- Access cookie теперь требует `purpose=access`: после обновления пользователям потребуется повторный вход.
+  Pickup JWT не подходит для авторизации. Все клиенты API, включая мобильные, нужно обновить вместе с сервером.
+- Миграция `0003` добавляет ограничения ролей/категорий/дат/цен/количеств, уникальность email без
+  учёта регистра, одной корзины и одного активного заказа на студента. Некорректные старые данные
+  вызывают явный отказ с диагностикой, без автоматического удаления.
+- `OrderDish.unit_price` хранит цену оформления. Для заказов до миграции используется текущая
+  цена каталога: восстановить неизвестную историческую цену невозможно. Дальнейшее изменение
+  справочника не меняет сумму уже оформленного заказа.
+- Корзина, оформление и отмена используют общий протокол блокировок; цены/остатки и ограничения
+  проверяются также в репозиториях, в том числе при параллельных операциях.
+
 ## Известные ограничения
 
-- QR-код студента содержит его числовой `id`: его можно подобрать. Нужен подписанный/ротируемый токен.
 - Запрос `/auth/generate` сообщает, существует ли email (нужно для понятной ошибки на странице входа).
-- Параметры `/auth/confirm` передаются в строке запроса и попадают в логи доступа; лучше перенести в тело (сломает старые клиенты).
-- Названия таблиц в БД в стиле `"Users"`, `"EducationInstitution"` (требуют кавычек) - историческое наследие; переименование возможно отдельной миграцией.
-- У фронтенда нет автотестов и сборки; JS лежит прямо в HTML-страницах.
+- Названия таблиц в БД в стиле `"Users"`, `"EducationInstitution"` (требуют кавычек) — историческое наследие.
+- Фронтенд без сборки; CI проверяет синтаксис JS, inline-модулей и QR-кодирование. Полный браузерный
+  e2e всех ролей пока не включён в CI.
+- Мониторинг, offsite-backup и оповещения нужно включить на VPS по [`ops/README.md`](ops/README.md).

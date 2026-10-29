@@ -27,8 +27,8 @@
     <p class="description_form">Для выдачи заказа отсканируйте QR-код студента.</p>
 
     <div class="mini_card">
-        <p>ID</p>
-        <input id="input_student_id" autocomplete="off">
+        <p>QR-код</p>
+        <input id="input_pickup_token" autocomplete="off">
     </div>
 
     <h2>Данные из базы</h2>
@@ -59,8 +59,7 @@
         show_message,
         updateOrderTotalPrice,
         authRequired,
-        creating_application_elements, 
-        check_student_id
+        creating_application_elements
     } from '../js/common.js'
 
     import { updating_dish_card } from '../js/meal_cards.js'
@@ -69,14 +68,28 @@
 
     const audio = new Audio('../mp3/sound_order_closing.mp3');
 
-    let student_id = null;
+    let pickupToken = null;
+    let searching = false;
+    let completing = false;
+
+    function extractPickupToken(raw) {
+        let token = raw.trim();
+        if (/^https?:\/\//i.test(token)) {
+            const url = new URL(token);
+            token = url.searchParams.get('pickup_token') || new URLSearchParams(url.hash.slice(1)).get('pickup_token') || '';
+        }
+        if (token.length > 2048 || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token)) {
+            throw new Error('Отсканируйте актуальный QR-код студента, не числовой ID');
+        }
+        return token;
+    }
 
     function focusInput() {
-        if (!DOM || !DOM.input_student_id) return;
+        if (!DOM || !DOM.input_pickup_token) return;
 
         setTimeout(() => {
-            DOM.input_student_id.focus();
-            DOM.input_student_id.select?.();
+            DOM.input_pickup_token.focus();
+            DOM.input_pickup_token.select?.();
         }, 30);
     }
 
@@ -84,7 +97,7 @@
         DOM = {
             student_name: document.getElementById('student_name'),
             order_id: document.getElementById('order_id'),
-            input_student_id: document.getElementById('input_student_id'),
+            input_pickup_token: document.getElementById('input_pickup_token'),
 
             container_with_data_from_api: document.getElementById('container_with_data_from_api'),
 
@@ -100,7 +113,9 @@
         DOM.close_order.addEventListener('click', close_order_func);
         DOM.find_client.addEventListener('click', find_client_func);
 
-        DOM.input_student_id.addEventListener('keydown', (e) => {
+        DOM.input_pickup_token.addEventListener('input', () => back_to_func(false, false));
+
+        DOM.input_pickup_token.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
                 find_client_func();
@@ -108,13 +123,13 @@
         });
 
         document.addEventListener('click', (e) => {
-            if (e.target !== DOM.input_student_id) {
+            if (e.target !== DOM.input_pickup_token) {
                 focusInput();
             }
         });
 
         document.addEventListener('focusin', (e) => {
-            if (e.target !== DOM.input_student_id) {
+            if (e.target !== DOM.input_pickup_token) {
                 focusInput();
             }
         });
@@ -126,23 +141,29 @@
     }));
     
     async function find_client_func() {
+        if (searching || completing) return;
+        searching = true;
+        back_to_func(false);
+        let scannedToken;
         try {
-            student_id = check_student_id(DOM.input_student_id.value);
-
-            const response = await fetch(`/api/orders/student_order?student_id=${encodeURIComponent(student_id)}`, {
-                method: 'GET',
-                credentials: 'include'
+            scannedToken = extractPickupToken(DOM.input_pickup_token.value);
+            const response = await fetch('/api/orders/student_order', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                credentials: 'include',
+                body: JSON.stringify({pickup_token: scannedToken})
             });
 
             const data = await response.json();
 
             if (!response.ok) {
-                if (data.detail.includes('Student not found')) {
+                if (String(data.detail).includes('Student not found')) {
                     throw new Error('Студента нет в базе данных');
                 }
-                throw new Error(`HTTP error! status: ${response.status}`);
+                throw new Error('QR-код недействителен или истёк. Отсканируйте новый QR-код.');
             }
 
+            if (scannedToken !== extractPickupToken(DOM.input_pickup_token.value)) return;
             const dataOrders = data.Orders;
 
             if (!data || Object.keys(dataOrders).length === 0) {
@@ -157,6 +178,7 @@
             
             updateOrderTotalPrice();
 
+            pickupToken = scannedToken;
             DOM.find_client.style.display = 'none';
             DOM.close_order.style.display = 'block';
             DOM.back_to.style.display = 'block';
@@ -174,21 +196,26 @@
             console.log(error);
             show_message(error, '-');
             focusInput();
+        } finally {
+            searching = false;
         }
     }
-    
+
     async function close_order_func() {
+        if (!pickupToken || searching || completing) return;
+        completing = true;
         try {
-            const response = await fetch(`/api/orders/order?student_id=${encodeURIComponent(student_id)}`, {
+            const response = await fetch('/api/orders/order', {
                 method: 'PATCH',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                credentials: 'include'
+                credentials: 'include',
+                body: JSON.stringify({pickup_token: pickupToken})
             });
             
             if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+                throw new Error('QR-код недействителен или истёк. Отсканируйте новый QR-код.');
             }
 
             audio.play();
@@ -198,8 +225,8 @@
             DOM.back_to.style.display = 'none';
             
             DOM.container_with_data_from_api.innerHTML = '';
-            DOM.input_student_id.value = '';
-            student_id = null;
+            DOM.input_pickup_token.value = '';
+            pickupToken = null;
             updateOrderTotalPrice();
 
             DOM.input_hint.forEach(element => {
@@ -213,19 +240,22 @@
 
         } catch (error) {
             console.error(error);
-            show_message('Ошибка при закрытии заказа', '-');
+            show_message('Выдача не выполнена. Отсканируйте актуальный QR-код заново.', '-');
+            back_to_func();
             focusInput();
+        } finally {
+            completing = false;
         }
     }
 
-    function back_to_func() {
+    function back_to_func(clearInput = true, shouldFocus = true) {
         DOM.find_client.style.display = 'block';
         DOM.close_order.style.display = 'none';
         DOM.back_to.style.display = 'none';
         
         DOM.container_with_data_from_api.innerHTML = '';
-        DOM.input_student_id.value = '';
-        student_id = null;
+        if (clearInput) DOM.input_pickup_token.value = '';
+        pickupToken = null;
         updateOrderTotalPrice();
 
         DOM.input_hint.forEach(element => {
@@ -235,7 +265,7 @@
         DOM.student_name.textContent = '';
         DOM.order_id.textContent = '';
 
-        focusInput();
+        if (shouldFocus) focusInput();
     }
 
     creating_application_elements();

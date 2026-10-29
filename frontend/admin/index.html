@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Администрирование столовой</title>
+    <link rel="stylesheet" href="/admin/admin.css">
+    <script type="module" src="/admin/admin.js"></script>
+</head>
+<body>
+<header>
+    <div><p class="eyebrow">Столовая колледжа</p><h1>Администрирование</h1></div>
+    <a id="log_out" href="/index.html">Выйти</a>
+</header>
+<main>
+    <p id="status" role="status" aria-live="polite">Проверяем доступ…</p>
+    <div id="panel" hidden>
+        <section aria-labelledby="institution-title">
+            <h2 id="institution-title">Ваше учреждение</h2>
+            <p id="institution"></p><p id="account" class="muted"></p>
+            <p class="muted">Пользователи и блюда ниже относятся только к вашему учреждению.</p>
+        </section>
+        <nav aria-label="Разделы"><a href="#users">Пользователи</a><a href="#dishes">Блюда</a></nav>
+        <section id="users" aria-labelledby="users-title">
+            <div class="section-heading"><h2 id="users-title">Пользователи</h2><button id="reload-users" type="button">Обновить список</button></div>
+            <div class="table-wrap"><table>
+                <caption class="sr-only">Пользователи вашего учреждения</caption>
+                <thead><tr><th>ID</th><th>Email</th><th>Роль</th><th>Профиль студента</th></tr></thead>
+                <tbody id="users-body"></tbody>
+            </table></div>
+            <p id="users-empty" hidden>Пользователей нет.</p>
+            <div class="pagination"><button id="previous" type="button">Назад</button><span id="page-info"></span><button id="next" type="button">Далее</button></div>
+            <h3>Добавить пользователя</h3>
+            <p class="muted">Администраторы создаются только серверной командой. Пароль не нужен: вход по коду из письма.</p>
+            <form id="user-form">
+                <div class="fields">
+                    <label>Email<input name="email" type="email" required maxlength="254" autocomplete="off"></label>
+                    <label>Роль<select name="role"><option value="student">Студент</option><option value="provider">Поставщик</option><option value="operator">Оператор раздачи</option></select></label>
+                </div>
+                <fieldset id="student-fields"><legend>Профиль студента</legend>
+                    <div class="fields">
+                        <label>ФИО<input name="full_name" required maxlength="200"></label>
+                        <label>Группа<input name="group_name" required maxlength="50"></label>
+                        <label>Начало обучения<input name="date_start" type="date" required></label>
+                        <label>Окончание обучения<input name="date_end" type="date" required></label>
+                    </div>
+                </fieldset>
+                <button class="primary" type="submit">Создать пользователя</button>
+            </form>
+        </section>
+        <section id="dishes" aria-labelledby="dishes-title">
+            <div class="section-heading"><h2 id="dishes-title">Блюда</h2><button id="reload-dishes" type="button">Обновить список</button></div>
+            <p class="muted">Удаление скрывает блюдо из меню, но сохраняет историю заказов. Создание с прежним названием возвращает удалённое блюдо.</p>
+            <div class="table-wrap"><table>
+                <caption class="sr-only">Активные блюда вашего учреждения</caption>
+                <thead><tr><th>ID</th><th>Название</th><th>Категория</th><th>Цена, ₽</th><th>Изображение (путь)</th><th>Действия</th></tr></thead>
+                <tbody id="dishes-body"></tbody>
+            </table></div>
+            <p id="dishes-empty" hidden>Активных блюд пока нет. Добавьте первое блюдо ниже.</p>
+            <h3 id="dish-form-title">Добавить блюдо</h3>
+            <form id="dish-form">
+                <div class="fields">
+                    <label>Название<input name="dish_name" required maxlength="100"></label>
+                    <label>Категория<select name="category"><option>Первое</option><option>Второе</option><option>Напитки</option><option>Десерт</option><option>Снеки</option></select></label>
+                    <label>Цена, ₽<input name="fixed_price" type="number" required min="1" max="100000" step="1"></label>
+                    <label>Путь изображения (необязательно)<input name="img_url" placeholder="meals/soup.jpg"></label>
+                </div>
+                <p class="muted">Относительный путь внутри /img, без начального / и без «..». Загрузка файлов не предусмотрена. При редактировании пустое поле сохраняет прежний путь.</p>
+                <button class="primary" id="save-dish" type="submit">Добавить блюдо</button>
+                <button id="cancel-edit" type="button" hidden>Отменить редактирование</button>
+            </form>
+        </section>
+    </div>
+</main>
+</body>
+</html>

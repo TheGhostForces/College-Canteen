@@ -1,7 +1,14 @@
+x-logging: &bounded-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   postgres:
     image: postgres:15-alpine
     restart: unless-stopped
+    logging: *bounded-logging
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Задайте POSTGRES_PASSWORD в .env}
@@ -15,11 +22,12 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
 
   app:
     build: ./server
     restart: unless-stopped
-    # все настройки приложения (POSTGRES_*, SECRET_KEY, RESEND_API_KEY...) берутся из .env
+    logging: *bounded-logging
     env_file: .env
     environment:
       POSTGRES_HOST: postgres
@@ -32,10 +40,17 @@ services:
       - app-network
     expose:
       - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
 
   nginx:
     image: nginx:alpine
     restart: unless-stopped
+    logging: *bounded-logging
     ports:
       - "80:80"
       - "443:443"

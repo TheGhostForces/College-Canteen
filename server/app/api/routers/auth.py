@@ -9,7 +9,7 @@ from app.core.config import get_settings
 from app.core.exceptions import BadGatewayError, BadRequestError, NotFoundError, TooManyRequestsError, UnauthorizedError
 from app.core.security import create_access_token, generate_login_code, verify_login_code
 from app.core.timeutils import now_local
-from app.schemas.auth import LoginCodeRequested, TokenResponse
+from app.schemas.auth import LoginCodeConfirm, LoginCodeRequest, LoginCodeRequested, TokenResponse
 from app.services.mailer import send_login_code
 
 logger = logging.getLogger("canteen.auth")
@@ -23,9 +23,9 @@ def _too_many_attempts(expires_at) -> TooManyRequestsError:
 
 
 @router.post("/generate", response_model=LoginCodeRequested, summary="Отправить код входа на почту")
-async def request_login_code(email: str, users: UsersRepo, codes: LoginCodesRepo):
+async def request_login_code(body: LoginCodeRequest, users: UsersRepo, codes: LoginCodesRepo):
     settings = get_settings()
-    user = await users.get_by_email(email)
+    user = await users.get_by_email(str(body.email))
     if user is None:
         raise NotFoundError("There is no such email")
 
@@ -37,7 +37,7 @@ async def request_login_code(email: str, users: UsersRepo, codes: LoginCodesRepo
             # resend - синхронная библиотека, поэтому в отдельном потоке (не блокируем event loop)
             await asyncio.to_thread(send_login_code, user.email, code)
         except Exception:
-            logger.exception("Не удалось отправить код входа")
+            logger.error("Не удалось отправить код входа")
             await codes.mark_used(login_code.id)
             raise BadGatewayError("Failed to send the code, try again later") from None
     elif login_code.attempts >= settings.login_code_max_attempts:
@@ -50,17 +50,15 @@ async def request_login_code(email: str, users: UsersRepo, codes: LoginCodesRepo
 
 @router.post("/confirm", response_model=TokenResponse, summary="Подтвердить код и войти")
 async def confirm_login_code(
-    user_id: int,
-    temporary_code_id: int,
-    code: str,
+    body: LoginCodeConfirm,
     response: Response,
     users: UsersRepo,
     codes: LoginCodesRepo,
     baskets: BasketRepo,
 ):
     settings = get_settings()
-    user = await users.get_by_id(user_id)
-    login_code = await codes.get_latest(user_id, temporary_code_id, only_active=False)
+    user = await users.get_by_id(body.user_id)
+    login_code = await codes.get_latest(body.user_id, body.temporary_code_id, only_active=False)
     if user is None or login_code is None:
         raise UnauthorizedError("Unauthorized")
     if login_code.used_at is not None:
@@ -71,7 +69,7 @@ async def confirm_login_code(
     # попытка списывается атомарно ДО проверки кода: параллельными запросами лимит не обойти
     if not await codes.consume_attempt(login_code.id):
         raise _too_many_attempts(login_code.expires_at)
-    if not verify_login_code(code, login_code.code_hash):
+    if not verify_login_code(body.code, login_code.code_hash):
         raise UnauthorizedError("Incorrect code")
 
     student = None

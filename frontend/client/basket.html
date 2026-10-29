@@ -75,88 +75,42 @@
 
     import { updating_dish_card } from '../js/meal_cards.js'
 
-    // ==================== НОВЫЙ КОД ДЛЯ QR И ID КЛИЕНТА ====================
-    // Переменная для хранения ID клиента
-    let currentStudentId = null;
-    let qrCodeInstance = null;
+    let qrRefreshTimer = null;
+    let qrExpiryTimer = null;
 
-    // Функция для получения Student_ID из API
-    async function fetchStudentId() {
-        const response = await fetch('/api/orders/order', {
-            method: 'GET',
-            credentials: 'include'
-        });
-        if (!response.ok) {
-            throw new Error('Не удалось получить идентификатор студента');
-        }
-        const data = await response.json();
-        // Ожидаем, что в ответе есть поле Student_ID
-        if (data.Student_ID) {
-            return data.Student_ID;
-        }
-        throw new Error('Student_ID не найден в ответе сервера');
-    }
-
-    // Функция для отображения ID клиента
-    function displayClientId(studentId) {
-        const clientIdDisplay = document.getElementById('client_id_display');
-        if (clientIdDisplay) {
-            clientIdDisplay.textContent = `ID: ${studentId}`;
-        }
-    }
-
-    // Функция для очистки и пересоздания QR-кода
-    function recreateQRCode(studentId) {
-        const qrcodeContainer = document.getElementById('qrcode');
-        if (!qrcodeContainer) return;
-        
-        // Очищаем контейнер
-        qrcodeContainer.innerHTML = '';
-        
-        // Создаем новый QR-код с увеличенным размером
+    // QR содержит короткоживущий pickup JWT, никогда не Student_ID.
+    async function refreshPickupQRCode() {
+        clearTimeout(qrRefreshTimer);
+        const container = document.getElementById('qrcode');
+        const label = document.getElementById('client_id_display');
         try {
-            qrCodeInstance = new QRCode(qrcodeContainer, {
-                text: encodeURIComponent(String(studentId)),
-                width: 300,  // Увеличенный размер
-                height: 300, // Увеличенный размер
-                colorDark: "#000000",
-                colorLight: "#ffffff",
-                correctLevel: QRCode.CorrectLevel.H
+            const response = await fetch('/api/orders/pickup_token', {
+                method: 'POST', credentials: 'include', cache: 'no-store'
             });
+            if (!response.ok) throw new Error('Не удалось обновить QR-код');
+            const data = await response.json();
+            const remaining = new Date(data.expires_at).getTime() - Date.now();
+            if (!Number.isFinite(remaining) || remaining <= 0) throw new Error('QR-код истёк');
+            clearTimeout(qrExpiryTimer);
+            container.innerHTML = '';
+            new QRCode(container, {
+                text: data.pickup_token,
+                width: 300, height: 300,
+                colorDark: '#000000', colorLight: '#ffffff',
+                correctLevel: QRCode.CorrectLevel.M
+            });
+            container.removeAttribute('title');
+            if (label) label.textContent = 'QR для выдачи (обновляется автоматически)';
+            qrExpiryTimer = setTimeout(() => {
+                container.textContent = 'QR-код истёк. Ожидайте обновления.';
+            }, remaining);
+            qrRefreshTimer = setTimeout(refreshPickupQRCode, Math.max(1000, remaining - 30000));
         } catch (error) {
-            console.error('Ошибка создания QR-кода:', error);
-            qrcodeContainer.innerHTML = '<div style="color: red;">Ошибка создания QR-кода</div>';
+            container.textContent = 'QR недоступен. Повторяем загрузку…';
+            if (label) label.textContent = '';
+            qrRefreshTimer = setTimeout(refreshPickupQRCode, 10000);
         }
     }
-
-    // Асинхронная генерация QR-кода и отображение ID
-    async function generateQRCodeAndDisplayId() {
-        try {
-            const studentId = await fetchStudentId();
-            currentStudentId = studentId;
-            
-            // Отображаем ID клиента
-            displayClientId(studentId);
-            
-            // Создаем QR-код
-            recreateQRCode(studentId);
-        } catch (error) {
-            console.error('Ошибка:', error);
-            show_message(error.message, '-');
-            const clientIdDisplay = document.getElementById('client_id_display');
-            if (clientIdDisplay) {
-                clientIdDisplay.textContent = 'ID не доступен';
-            }
-            const qrcodeContainer = document.getElementById('qrcode');
-            if (qrcodeContainer) {
-                qrcodeContainer.innerHTML = '<div style="color: #ff4444; padding: 20px; text-align: center;">❌ Ошибка загрузки QR-кода</div>';
-            }
-        }
-    }
-
-    // Запускаем генерацию QR-кода и отображение ID
-    generateQRCodeAndDisplayId();
-    // ==========================================================
 
     // Состояние QR-кода
     let is_active = false
@@ -313,12 +267,7 @@
             updating_dish_card(dishes_page_order, dishes, 'dishes_container_const_amount')
             updateOrderTotalPrice(dishes_page_order);
             
-            // Обновляем QR-код при загрузке страницы заказа
-            if (currentStudentId) {
-                recreateQRCode(currentStudentId);
-            } else {
-                await generateQRCodeAndDisplayId();
-            }
+            await refreshPickupQRCode();
         } catch (error) {
             console.error(error);
             show_message('Ошибка загрузки', '-')
@@ -439,11 +388,14 @@
         justify-content: center;
         align-items: center;
         cursor: pointer;
+        padding: 20px;
+        background: white;
         transition: transform 0.3s ease;
     }
     
-    #qrcode canvas,
-    #qrcode img {
+    #order #qrcode_container #qrcode canvas,
+    #order #qrcode_container #qrcode img {
+        width: 300px;
         max-width: 100%;
         height: auto;
         display: block;

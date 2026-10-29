@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import Date, Enum, ForeignKey, Index, UniqueConstraint, text
+from sqlalchemy import CheckConstraint, Date, Enum, ForeignKey, Index, UniqueConstraint, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -10,6 +10,11 @@ from app.db.enums import OrderStatus
 
 class UsersOrm(Base):
     __tablename__ = "Users"
+
+    __table_args__ = (
+        CheckConstraint("role IN ('student', 'provider', 'operator', 'admin')", name="ck_users_role"),
+        Index("uq_users_email_lower", func.lower(text("email")), unique=True),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     email: Mapped[str] = mapped_column(nullable=False, unique=True)
@@ -26,6 +31,7 @@ class UsersOrm(Base):
 
 class StudentsOrm(Base):
     __tablename__ = "Students"
+    __table_args__ = (CheckConstraint("date_end >= date_start", name="ck_students_dates"),)
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     full_name: Mapped[str] = mapped_column(nullable=False)
@@ -44,13 +50,17 @@ class StudentsOrm(Base):
 
 class TemporaryCodeOrm(Base):
     __tablename__ = "TemporaryCode"
+    __table_args__ = (
+        CheckConstraint("attempts >= 0", name="ck_temporary_code_attempts"),
+        CheckConstraint("expires_at > created_at", name="ck_temporary_code_dates"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     code_hash: Mapped[str] = mapped_column(nullable=False)
     attempts: Mapped[int] = mapped_column(nullable=False)
     created_at: Mapped[datetime] = mapped_column(nullable=False)
     expires_at: Mapped[datetime] = mapped_column(nullable=False)
-    used_at: Mapped[datetime] = mapped_column(nullable=True)
+    used_at: Mapped[datetime | None] = mapped_column(nullable=True)
 
     user_id: Mapped[int] = mapped_column(ForeignKey("Users.id"), nullable=False, index=True)
     user: Mapped["UsersOrm"] = relationship("UsersOrm", back_populates="temporary_codes")
@@ -76,7 +86,7 @@ class DishesOrm(Base):
     # Вес
     # Пищевые ценности
     fixed_price: Mapped[int] = mapped_column(nullable=False)
-    img_url: Mapped[str] = mapped_column(nullable=True)
+    img_url: Mapped[str | None] = mapped_column(nullable=True)
     is_active: Mapped[bool] = mapped_column(nullable=False, default=True, server_default=text("true"))
 
     institution_id: Mapped[int] = mapped_column(ForeignKey("EducationInstitution.id"), nullable=False)
@@ -85,7 +95,11 @@ class DishesOrm(Base):
     order_items: Mapped[list["OrderDishOrm"]] = relationship("OrderDishOrm", back_populates="dish")
     schedules: Mapped[list["ScheduleDishesOrm"]] = relationship("ScheduleDishesOrm", back_populates="dish")
 
-    __table_args__ = (UniqueConstraint("institution_id", "dish_name", name="uq_dish_institution_name"),)
+    __table_args__ = (
+        UniqueConstraint("institution_id", "dish_name", name="uq_dish_institution_name"),
+        CheckConstraint("fixed_price > 0", name="ck_dishes_price"),
+        CheckConstraint("category IN ('Первое', 'Второе', 'Напитки', 'Десерт', 'Снеки')", name="ck_dishes_category"),
+    )
 
 
 class ScheduleDishesOrm(Base):
@@ -103,14 +117,18 @@ class ScheduleDishesOrm(Base):
         "ShoppingCartDishesOrm", back_populates="schedule_dish"
     )
 
-    __table_args__ = (UniqueConstraint("dish_id", "date", name="uq_dish_date"),)
+    __table_args__ = (
+        UniqueConstraint("dish_id", "date", name="uq_dish_date"),
+        CheckConstraint("quantity >= 0 AND total_quantity >= quantity", name="ck_schedule_quantities"),
+    )
 
 
 class ShoppingCartOrm(Base):
     __tablename__ = "ShoppingCart"
+    __table_args__ = (UniqueConstraint("student_id", name="uq_cart_student"),)
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    updated_at: Mapped[datetime] = mapped_column(nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(nullable=True)
 
     student_id: Mapped[int] = mapped_column(ForeignKey("Students.id"), nullable=False)
     student: Mapped["StudentsOrm"] = relationship("StudentsOrm", back_populates="shopping_carts")
@@ -131,7 +149,10 @@ class ShoppingCartDishesOrm(Base):
     shopping_cart: Mapped["ShoppingCartOrm"] = relationship("ShoppingCartOrm", back_populates="cart_dishes")
     schedule_dish: Mapped["ScheduleDishesOrm"] = relationship("ScheduleDishesOrm", back_populates="cart_items")
 
-    __table_args__ = (UniqueConstraint("shoppingcart_id", "schedule_dish_id", name="uq_cart_schedule_dish"),)
+    __table_args__ = (
+        UniqueConstraint("shoppingcart_id", "schedule_dish_id", name="uq_cart_schedule_dish"),
+        CheckConstraint("cart_quantity > 0", name="ck_cart_dishes_quantity"),
+    )
 
 
 class OrderOrm(Base):
@@ -140,7 +161,7 @@ class OrderOrm(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     order_number: Mapped[str] = mapped_column(nullable=False, unique=True, index=True)
     order_status: Mapped[OrderStatus] = mapped_column(Enum(OrderStatus), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(nullable=False)
     # День выдачи. Раньше выводился из created_at + 1 день, что ломало границы суток.
     pickup_date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -151,15 +172,28 @@ class OrderOrm(Base):
 
     __table_args__ = (
         Index("ix_order_student_status", "student_id", "order_status"),
+        Index(
+            "uq_order_student_active",
+            "student_id",
+            unique=True,
+            postgresql_where=text("order_status = 'IN_PROGRESS'"),
+        ),
         Index("ix_order_status_pickup_date", "order_status", "pickup_date"),
     )
 
 
 class OrderDishOrm(Base):
     __tablename__ = "OrderDish"
+    __table_args__ = (
+        CheckConstraint("cart_quantity > 0", name="ck_order_dishes_quantity"),
+        CheckConstraint("unit_price > 0", name="ck_order_dishes_price"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     cart_quantity: Mapped[int] = mapped_column(nullable=False)
+
+    # Цена на момент оформления: изменение каталога не переписывает историю.
+    unit_price: Mapped[int] = mapped_column(nullable=False)
 
     order_id: Mapped[int] = mapped_column(ForeignKey("Order.id"), nullable=False, index=True)
     dish_id: Mapped[int] = mapped_column(ForeignKey("Dishes.id"), nullable=False)

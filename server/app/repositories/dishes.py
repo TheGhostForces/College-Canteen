@@ -223,11 +223,14 @@ class DishesRepository:
             raise BadRequestError("Duplicate dishes in request")
 
         valid = await self.session.execute(
-            select(DishesOrm.id).where(
+            select(DishesOrm.id)
+            .where(
                 DishesOrm.id.in_(dish_ids),
                 DishesOrm.institution_id == institution_id,
                 DishesOrm.is_active.is_(True),
             )
+            .order_by(DishesOrm.id)
+            .with_for_update()
         )
         invalid_ids = set(dish_ids) - {dish_id for (dish_id,) in valid}
         if invalid_ids:
@@ -237,7 +240,9 @@ class DishesRepository:
         locked = await self.session.execute(
             select(ScheduleDishesOrm)
             .where(ScheduleDishesOrm.dish_id.in_(dish_ids), ScheduleDishesOrm.date == day)
+            .order_by(ScheduleDishesOrm.id)
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         schedule_by_dish = {schedule.dish_id: schedule for schedule in locked.scalars()}
 

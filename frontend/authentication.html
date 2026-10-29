@@ -76,16 +76,16 @@
                 return
             }
 
-            const response = await fetch(
-                `/api/auth/confirm?` +
-                `user_id=${encodeURIComponent(user_authentication.user_id)}&` +
-                `temporary_code_id=${encodeURIComponent(user_authentication.tmp_code_id)}&` +
-                `code=${encodeURIComponent(sms)}`, 
-                {
-                    method: 'POST',
-                    credentials: 'include'
-                }
-            );
+            const response = await fetch('/api/auth/confirm', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                credentials: 'include',
+                body: JSON.stringify({
+                    user_id: user_authentication.user_id,
+                    temporary_code_id: user_authentication.tmp_code_id,
+                    code: sms
+                })
+            });
 
             const data = await response.json().catch(() => ({}));
             const detail = String(data.detail || '');

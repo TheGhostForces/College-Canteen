@@ -1,0 +1,11 @@
+[Unit]
+Description=College Canteen production health checks
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/college-canteen
+ExecStart=/bin/bash /opt/college-canteen/ops/check-production.sh https://voscollege.ru
+StandardOutput=journal
+StandardError=journal

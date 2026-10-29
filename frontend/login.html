@@ -95,8 +95,10 @@
                 throw new Error('Введите корректный email');
             }
 
-            const response = await fetch(`/api/auth/generate?email=${encodeURIComponent(studentId)}`, {
-                method: 'POST'
+            const response = await fetch('/api/auth/generate', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({email: studentId})
             });
 
             if (!response.ok) {

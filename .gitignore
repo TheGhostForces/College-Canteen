@@ -225,3 +225,6 @@ prepros.config*
 # сертификаты и данные certbot
 nginx/ssl/
 certbot/
+
+# Временные изолированные рабочие деревья
+/.claude/worktrees/

@@ -47,6 +47,15 @@ def create_app() -> FastAPI:
         allow_headers=["Content-Type"],
     )
 
+    @app.middleware("http")
+    async def prevent_sensitive_response_caching(request: Request, call_next):
+        response = await call_next(request)
+        path = request.scope["path"].removeprefix(request.scope.get("root_path", ""))
+        if path.startswith(("/auth/", "/orders/", "/admin/", "/basket/", "/history/")):
+            # Include validation/authentication errors, not just successful token responses.
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
     @app.exception_handler(AppError)
     async def handle_app_error(request: Request, exc: AppError) -> JSONResponse:
         # тот же формат, что у HTTPException: {"detail": ...} - его ждёт фронтенд

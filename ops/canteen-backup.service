@@ -1,0 +1,12 @@
+[Unit]
+Description=College Canteen database backup
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/college-canteen
+UMask=0077
+ExecStart=/bin/bash /opt/college-canteen/ops/backup.sh /var/backups/college-canteen
+StandardOutput=journal
+StandardError=journal
