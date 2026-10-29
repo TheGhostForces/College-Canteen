@@ -1,10 +1,12 @@
 from datetime import date
 
-from fastapi import APIRouter
+import jwt
+from fastapi import APIRouter, Response
 
 from app.api.deps import CurrentStudent, Operator, OrdersRepo, Provider, UsersRepo
 from app.core.config import get_settings
 from app.core.exceptions import BadRequestError, NotFoundError
+from app.core.security import create_pickup_token, decode_pickup_token
 from app.core.timeutils import now_local, today_local, tomorrow_local
 from app.db.models import StudentsOrm, UsersOrm
 from app.schemas.common import OkResponse
@@ -13,16 +15,30 @@ from app.schemas.orders import (
     OrderCreatedResponse,
     OrderedDishesResponse,
     OrdersResponse,
+    PickupTokenRequest,
+    PickupTokenResponse,
     StudentOrdersResponse,
 )
 
 router = APIRouter(prefix="/orders", tags=["Заказы"])
 
 
-async def _get_student_of_operator(student_id: int, operator: UsersOrm, users: UsersRepo) -> StudentsOrm:
-    """Оператор работает только со студентами своего заведения (чужих "не видит")."""
-    student = await users.get_student_by_id(student_id)
-    if student is None or await users.get_student_institution_id(student_id) != operator.institution_id:
+async def _get_student_of_operator(token: str, operator: UsersOrm, users: UsersRepo) -> StudentsOrm:
+    """Проверяем QR и актуальную принадлежность студента заведению оператора."""
+    try:
+        claims = decode_pickup_token(token)
+    except (jwt.PyJWTError, ValueError):
+        raise BadRequestError("Pickup token has expired or is invalid") from None
+    student = await users.get_student_by_id(claims["student_id"])
+    if (
+        student is None
+        or student.user_id != int(claims["sub"])
+        or claims["institution_id"] != operator.institution_id
+        or await users.get_student_institution_id(student.id) != operator.institution_id
+    ):
+        raise NotFoundError("Student not found")
+    user = await users.get_by_id(student.user_id)
+    if user is None or user.role != "student":
         raise NotFoundError("Student not found")
     return student
 
@@ -48,14 +64,26 @@ async def get_my_orders(student: CurrentStudent, orders: OrdersRepo):
     )
 
 
+@router.post("/pickup_token", response_model=PickupTokenResponse, summary="Получить QR для выдачи (студент)")
+async def get_pickup_token(student: CurrentStudent, users: UsersRepo, response: Response):
+    institution_id = await users.get_student_institution_id(student.id)
+    if institution_id is None:
+        raise NotFoundError("Student institution not found")
+    token, expires_at = create_pickup_token(student.user_id, student.id, institution_id)
+    response.headers["Cache-Control"] = "no-store"
+    return PickupTokenResponse(pickup_token=token, expires_at=expires_at)
+
+
 # ---- оператор раздачи ----
-@router.get(
+@router.post(
     "/student_order",
     response_model=StudentOrdersResponse,
     summary="Заказы студента к выдаче сегодня (оператор)",
 )
-async def get_student_orders_for_pickup(student_id: int, operator: Operator, users: UsersRepo, orders: OrdersRepo):
-    student = await _get_student_of_operator(student_id, operator, users)
+async def get_student_orders_for_pickup(
+    body: PickupTokenRequest, operator: Operator, users: UsersRepo, orders: OrdersRepo
+):
+    student = await _get_student_of_operator(body.pickup_token, operator, users)
     return StudentOrdersResponse(
         Name=student.full_name,
         Student_ID=student.id,
@@ -64,9 +92,9 @@ async def get_student_orders_for_pickup(student_id: int, operator: Operator, use
 
 
 @router.patch("/order", response_model=OkResponse, summary="Отметить заказ студента выданным (оператор)")
-async def complete_order(student_id: int, operator: Operator, users: UsersRepo, orders: OrdersRepo):
-    await _get_student_of_operator(student_id, operator, users)
-    if not await orders.complete_todays_orders(student_id):
+async def complete_order(body: PickupTokenRequest, operator: Operator, users: UsersRepo, orders: OrdersRepo):
+    student = await _get_student_of_operator(body.pickup_token, operator, users)
+    if not await orders.complete_todays_orders(student.id):
         raise NotFoundError("No order in progress for this student")
     return OkResponse()
 

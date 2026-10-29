@@ -147,12 +147,12 @@ async def login(sent_codes, world):
     async def _login(email: str) -> AsyncClient:
         client = _new_client()
         clients.append(client)
-        r = await client.post("/auth/generate", params={"email": email})
+        r = await client.post("/auth/generate", json={"email": email})
         assert r.status_code == 200, r.text
         data = r.json()
         r = await client.post(
             "/auth/confirm",
-            params={
+            json={
                 "user_id": data["user_id"],
                 "temporary_code_id": data["tmp_code_id"],
                 "code": sent_codes[email.lower()],

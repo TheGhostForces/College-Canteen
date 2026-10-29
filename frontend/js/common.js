@@ -505,6 +505,8 @@ export function rights_verification(user_role){
         window.location.href = '/client/dishes.html';
     }else if (user_role === 'operator'){
         window.location.href = '/distribution_operator/order_search.html';
+    }else if (user_role === 'admin'){
+        window.location.href = '/admin/index.html';
     }else if (user_role === 'provider'){
         window.location.href = '/food_supplier/meal_planning.html';
     }else{

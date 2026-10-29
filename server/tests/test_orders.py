@@ -145,28 +145,28 @@ async def test_replanning_keeps_already_ordered_portions(clients, menu, world):
 async def test_operator_sees_only_orders_due_today(clients, menu):
     await _add(clients.student, menu["soup"], 1)
     await clients.student.post("/orders/order")
-    sid = await _student_id(clients.student)
+    token = (await clients.student.post("/orders/pickup_token")).json()["pickup_token"]
 
     # заказ оформлен на завтра: сегодня оператору нечего выдавать
-    r = await clients.operator.get("/orders/student_order", params={"student_id": sid})
+    r = await clients.operator.post("/orders/student_order", json={"pickup_token": token})
     assert r.status_code == 200 and r.json()["Orders"] == {}
-    assert (await clients.operator.patch("/orders/order", params={"student_id": sid})).status_code == 404
+    assert (await clients.operator.patch("/orders/order", json={"pickup_token": token})).status_code == 404
 
     await _make_pickup_today()
-    r = await clients.operator.get("/orders/student_order", params={"student_id": sid})
+    r = await clients.operator.post("/orders/student_order", json={"pickup_token": token})
     assert len(r.json()["Orders"]) == 1
-    assert (await clients.operator.patch("/orders/order", params={"student_id": sid})).status_code == 200
-    assert (await clients.operator.patch("/orders/order", params={"student_id": sid})).status_code == 404  # уже выдан
+    assert (await clients.operator.patch("/orders/order", json={"pickup_token": token})).status_code == 200
+    assert (await clients.operator.patch("/orders/order", json={"pickup_token": token})).status_code == 404  # уже выдан
 
 
 async def test_operator_cannot_access_other_institution_students(clients, menu):
     await _add(clients.student, menu["soup"], 1)
     await clients.student.post("/orders/order")
-    sid = await _student_id(clients.student)
+    token = (await clients.student.post("/orders/pickup_token")).json()["pickup_token"]
     await _make_pickup_today()
 
-    assert (await clients.operator2.get("/orders/student_order", params={"student_id": sid})).status_code == 404
-    assert (await clients.operator2.patch("/orders/order", params={"student_id": sid})).status_code == 404
+    assert (await clients.operator2.post("/orders/student_order", json={"pickup_token": token})).status_code == 404
+    assert (await clients.operator2.patch("/orders/order", json={"pickup_token": token})).status_code == 404
 
 
 async def test_history_and_expiration(clients, menu):
@@ -198,3 +198,93 @@ async def test_order_created_just_after_midnight_is_not_expired_early(clients, m
     await _make_pickup_today()
     await nightly_cleanup()
     assert len((await clients.student.get("/orders/order")).json()["Orders"]) == 1
+
+
+async def test_pickup_token_is_short_lived_and_student_only(clients, anon, world):
+    from datetime import UTC, datetime
+
+    import jwt
+
+    from app.core.config import get_settings
+
+    r = await clients.student.post("/orders/pickup_token")
+    assert r.status_code == 200
+    assert r.headers["cache-control"] == "no-store"
+    data = r.json()
+    claims = jwt.decode(data["pickup_token"], get_settings().secret_key.get_secret_value(), algorithms=["HS256"])
+    assert claims["purpose"] == "pickup"
+    assert claims["student_id"] == await _student_id(clients.student)
+    assert claims["institution_id"] == world.inst1
+    assert int(claims["sub"]) > 0
+    assert 0 < claims["exp"] - datetime.now(UTC).timestamp() <= 300
+    assert datetime.fromisoformat(data["expires_at"]).timestamp() == claims["exp"]
+    assert (await anon.post("/orders/pickup_token")).status_code == 401
+    for client in (clients.operator, clients.admin, clients.provider):
+        assert (await client.post("/orders/pickup_token")).status_code == 403
+
+
+async def test_numeric_pickup_bypass_is_rejected(clients, menu):
+    await _add(clients.student, menu["soup"], 1)
+    await clients.student.post("/orders/order")
+    await _make_pickup_today()
+    sid = await _student_id(clients.student)
+    assert (await clients.operator.get("/orders/student_order", params={"student_id": sid})).status_code == 405
+    assert (await clients.operator.patch("/orders/order", params={"student_id": sid})).status_code == 422
+    for method, path in (("post", "/orders/student_order"), ("patch", "/orders/order")):
+        call = getattr(clients.operator, method)
+        assert (await call(path, json={"student_id": sid})).status_code == 422
+        assert (await call(path, json={"pickup_token": str(sid)})).status_code == 400
+    token = (await clients.student.post("/orders/pickup_token")).json()["pickup_token"]
+    r = await clients.operator.post("/orders/student_order", json={"pickup_token": token})
+    assert len(r.json()["Orders"]) == 1
+
+
+async def test_invalid_pickup_tokens_rejected_at_search_and_completion(clients, menu, world):
+    from datetime import UTC, datetime, timedelta
+
+    import jwt
+
+    from app.core.config import get_settings
+
+    await _add(clients.student, menu["soup"], 1)
+    await clients.student.post("/orders/order")
+    await _make_pickup_today()
+    token = (await clients.student.post("/orders/pickup_token")).json()["pickup_token"]
+    key = get_settings().secret_key.get_secret_value()
+    claims = jwt.decode(token, key, algorithms=["HS256"])
+    invalid = [
+        jwt.encode({**claims, "exp": datetime.now(UTC) - timedelta(seconds=1)}, key, algorithm="HS256"),
+        jwt.encode({**claims, "purpose": "access"}, key, algorithm="HS256"),
+        jwt.encode(claims, "wrong-signing-key-that-is-at-least-32-bytes", algorithm="HS256"),
+        clients.student.cookies.get("access_token").removeprefix("Bearer "),
+        "not-a-jwt",
+    ]
+    for missing in ("exp", "purpose", "sub", "student_id", "institution_id"):
+        invalid.append(jwt.encode({k: v for k, v in claims.items() if k != missing}, key, algorithm="HS256"))
+    for token_value in invalid:
+        for method, path in (("post", "/orders/student_order"), ("patch", "/orders/order")):
+            r = await getattr(clients.operator, method)(path, json={"pickup_token": token_value})
+            assert r.status_code == 400, r.text
+    for changed in ({"sub": "99999"}, {"institution_id": world.inst2}, {"student_id": 99999}):
+        forged = jwt.encode({**claims, **changed}, key, algorithm="HS256")
+        for method, path in (("post", "/orders/student_order"), ("patch", "/orders/order")):
+            r = await getattr(clients.operator, method)(path, json={"pickup_token": forged})
+            assert r.status_code == 404, r.text
+    assert (await clients.operator.patch("/orders/order", json={"pickup_token": token})).status_code == 200
+
+
+async def test_pickup_rechecks_current_institution(clients, menu, world):
+    from app.db.models import UsersOrm
+
+    await _add(clients.student, menu["soup"], 1)
+    await clients.student.post("/orders/order")
+    await _make_pickup_today()
+    token = (await clients.student.post("/orders/pickup_token")).json()["pickup_token"]
+    async with SessionFactory() as session:
+        await session.execute(update(UsersOrm).where(UsersOrm.email == "stud@x.ru").values(institution_id=world.inst2))
+        await session.commit()
+    for operator in (clients.operator, clients.operator2):
+        r = await operator.post("/orders/student_order", json={"pickup_token": token})
+        assert r.status_code == 404
+        r = await operator.patch("/orders/order", json={"pickup_token": token})
+        assert r.status_code == 404

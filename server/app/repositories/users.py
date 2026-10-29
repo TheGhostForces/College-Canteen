@@ -1,10 +1,11 @@
 from sqlalchemy import exists, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import BadRequestError, ConflictError
 from app.db.enums import UserRole
-from app.db.models import StudentsOrm, UsersOrm
+from app.db.models import EducationInstitutionOrm, StudentsOrm, UsersOrm
 from app.schemas.users import StudentCreate, UserCreate
 
 
@@ -35,13 +36,33 @@ class UsersRepository:
         )
         return (await self.session.execute(query)).scalar_one_or_none()
 
-    async def create(self, user: UserCreate, student: StudentCreate | None = None) -> int:
-        """Создаёт пользователя (для роли student - вместе с профилем студента)."""
+    async def get_institution(self, institution_id: int) -> EducationInstitutionOrm | None:
+        return await self.session.get(EducationInstitutionOrm, institution_id)
+
+    async def list_for_institution(self, institution_id: int, limit: int, offset: int) -> tuple[list[UsersOrm], int]:
+        scope = UsersOrm.institution_id == institution_id
+        total = await self.session.scalar(select(func.count()).select_from(UsersOrm).where(scope))
+        query = (
+            select(UsersOrm)
+            .where(scope)
+            .options(selectinload(UsersOrm.student))
+            .order_by(UsersOrm.id)
+            .limit(limit)
+            .offset(offset)
+        )
+        return list((await self.session.scalars(query)).all()), total
+
+    async def create(self, user: UserCreate, institution_id: int, student: StudentCreate | None = None) -> int:
+        """Создаёт пользователя только в учреждении, переданном сервером."""
+        if user.role not in (UserRole.STUDENT, UserRole.PROVIDER, UserRole.OPERATOR):
+            raise BadRequestError("Admin creation is only allowed through bootstrap_admin")
+        if user.role != UserRole.STUDENT and student is not None:
+            raise BadRequestError("Student data is only allowed for role student")
         email_taken = select(exists().where(func.lower(UsersOrm.email) == user.email.lower()))
         if (await self.session.execute(email_taken)).scalar():
             raise ConflictError(f"User with email '{user.email}' already exists")
 
-        user_orm = UsersOrm(email=user.email, role=user.role.value, institution_id=user.institution_id)
+        user_orm = UsersOrm(email=user.email, role=user.role.value, institution_id=institution_id)
         if user.role == UserRole.STUDENT:
             if student is None:
                 raise BadRequestError("Student data is required for role student")

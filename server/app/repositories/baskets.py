@@ -5,7 +5,14 @@ from sqlalchemy.orm import selectinload
 from app.core.config import get_settings
 from app.core.exceptions import BadRequestError, NotFoundError
 from app.core.timeutils import now_local, today_local, tomorrow_local
-from app.db.models import DishesOrm, ScheduleDishesOrm, ShoppingCartDishesOrm, ShoppingCartOrm
+from app.db.models import (
+    DishesOrm,
+    ScheduleDishesOrm,
+    ShoppingCartDishesOrm,
+    ShoppingCartOrm,
+    StudentsOrm,
+    UsersOrm,
+)
 
 
 class BasketRepository:
@@ -17,12 +24,16 @@ class BasketRepository:
 
     # ---- чтение ----
     async def get_by_student(self, student_id: int) -> ShoppingCartOrm | None:
-        query = select(ShoppingCartOrm).where(ShoppingCartOrm.student_id == student_id)
+        query = (
+            select(ShoppingCartOrm)
+            .where(ShoppingCartOrm.student_id == student_id)
+            .execution_options(populate_existing=True)
+        )
         return (await self.session.execute(query)).scalar_one_or_none()
 
     async def create_for_student(self, student_id: int) -> ShoppingCartOrm:
-        basket = ShoppingCartOrm(student_id=student_id)
-        self.session.add(basket)
+        await self.lock_student(student_id)
+        basket = await self.get_by_student(student_id) or await self._create_basket(student_id)
         await self.session.commit()
         return basket
 
@@ -53,7 +64,10 @@ class BasketRepository:
 
     # ---- изменение ----
     async def add_dish(self, student_id: int, dish_id: int, quantity: int) -> None:
-        schedule_dish = await self._get_tomorrow_schedule(dish_id)
+        if quantity <= 0:
+            raise BadRequestError("Quantity must be positive")
+        institution_id = await self.lock_student(student_id)
+        schedule_dish = await self._get_tomorrow_schedule(dish_id, institution_id)
         basket = await self.get_by_student(student_id) or await self._create_basket(student_id)
 
         item = await self._get_item(basket.id, schedule_dish.id)
@@ -64,7 +78,7 @@ class BasketRepository:
             )
 
         total_dishes, total_amount = await self._totals(basket.id)
-        self._check_limits(total_dishes, total_amount, quantity, schedule_dish.dish.fixed_price * quantity)
+        self.check_limits(total_dishes, total_amount, quantity, schedule_dish.dish.fixed_price * quantity)
 
         if item:
             item.cart_quantity = new_quantity
@@ -79,7 +93,10 @@ class BasketRepository:
 
     async def set_quantity(self, student_id: int, dish_id: int, quantity: int) -> None:
         """Устанавливает количество блюда в корзине; 0 - удалить позицию."""
-        schedule_dish = await self._get_tomorrow_schedule(dish_id)
+        if quantity < 0:
+            raise BadRequestError("Quantity must not be negative")
+        institution_id = await self.lock_student(student_id)
+        schedule_dish = await self._get_tomorrow_schedule(dish_id, institution_id)
         basket = await self.get_by_student(student_id)
         if basket is None:
             raise NotFoundError("Cart not found")
@@ -95,13 +112,14 @@ class BasketRepository:
                     f"Requested quantity ({quantity}) exceeds available quantity ({schedule_dish.quantity})"
                 )
             other_dishes, other_amount = await self._totals(basket.id, exclude_dish_id=dish_id)
-            self._check_limits(other_dishes, other_amount, quantity, schedule_dish.dish.fixed_price * quantity)
+            self.check_limits(other_dishes, other_amount, quantity, schedule_dish.dish.fixed_price * quantity)
             item.cart_quantity = quantity
 
         basket.updated_at = now_local()
         await self.session.commit()
 
     async def remove_dish(self, student_id: int, dish_id: int) -> None:
+        await self.lock_student(student_id)
         basket = await self.get_by_student(student_id)
         if basket is None:
             raise NotFoundError("Basket not found")
@@ -121,20 +139,56 @@ class BasketRepository:
     async def clear_stale_items(self) -> int:
         """Удаляет позиции корзин на уже наступившие даты (вызывается ночной задачей)."""
         stale_schedules = select(ScheduleDishesOrm.id).where(ScheduleDishesOrm.date <= today_local())
+        affected_students = (
+            select(ShoppingCartOrm.student_id)
+            .join(ShoppingCartDishesOrm)
+            .where(ShoppingCartDishesOrm.schedule_dish_id.in_(stale_schedules))
+        )
+        student_ids = list(
+            (
+                await self.session.execute(
+                    select(StudentsOrm.id)
+                    .where(StudentsOrm.id.in_(affected_students))
+                    .order_by(StudentsOrm.id)
+                    .with_for_update()
+                )
+            ).scalars()
+        )
+        locked_carts = select(ShoppingCartOrm.id).where(ShoppingCartOrm.student_id.in_(student_ids))
         result = await self.session.execute(
-            delete(ShoppingCartDishesOrm).where(ShoppingCartDishesOrm.schedule_dish_id.in_(stale_schedules))
+            delete(ShoppingCartDishesOrm).where(
+                ShoppingCartDishesOrm.schedule_dish_id.in_(stale_schedules),
+                ShoppingCartDishesOrm.shoppingcart_id.in_(locked_carts),
+            )
         )
         await self.session.commit()
         return result.rowcount
 
     # ---- внутреннее ----
+    async def lock_student(self, student_id: int) -> int:
+        """Transaction lock shared by all cart writes, checkout and cancellation.
+
+        Locking the student works even before their cart/first order exists.
+        The caller must commit/rollback (or close the session) to release it.
+        """
+        query = (
+            select(UsersOrm.institution_id)
+            .join(StudentsOrm, StudentsOrm.user_id == UsersOrm.id)
+            .where(StudentsOrm.id == student_id)
+            .with_for_update(of=StudentsOrm)
+        )
+        institution_id = (await self.session.execute(query)).scalar_one_or_none()
+        if institution_id is None:
+            raise NotFoundError("Student not found")
+        return institution_id
+
     async def _create_basket(self, student_id: int) -> ShoppingCartOrm:
         basket = ShoppingCartOrm(student_id=student_id)
         self.session.add(basket)
         await self.session.flush()
         return basket
 
-    async def _get_tomorrow_schedule(self, dish_id: int) -> ScheduleDishesOrm:
+    async def _get_tomorrow_schedule(self, dish_id: int, institution_id: int) -> ScheduleDishesOrm:
         query = (
             select(ScheduleDishesOrm)
             .options(selectinload(ScheduleDishesOrm.dish))
@@ -143,7 +197,9 @@ class BasketRepository:
                 ScheduleDishesOrm.dish_id == dish_id,
                 ScheduleDishesOrm.date == tomorrow_local(),
                 DishesOrm.is_active.is_(True),
+                DishesOrm.institution_id == institution_id,
             )
+            .execution_options(populate_existing=True)
         )
         schedule_dish = (await self.session.execute(query)).scalar_one_or_none()
         if schedule_dish is None:
@@ -151,9 +207,13 @@ class BasketRepository:
         return schedule_dish
 
     async def _get_item(self, basket_id: int, schedule_dish_id: int) -> ShoppingCartDishesOrm | None:
-        query = select(ShoppingCartDishesOrm).where(
-            ShoppingCartDishesOrm.shoppingcart_id == basket_id,
-            ShoppingCartDishesOrm.schedule_dish_id == schedule_dish_id,
+        query = (
+            select(ShoppingCartDishesOrm)
+            .where(
+                ShoppingCartDishesOrm.shoppingcart_id == basket_id,
+                ShoppingCartDishesOrm.schedule_dish_id == schedule_dish_id,
+            )
+            .execution_options(populate_existing=True)
         )
         return (await self.session.execute(query)).scalar_one_or_none()
 
@@ -174,7 +234,7 @@ class BasketRepository:
         dishes, amount = (await self.session.execute(query)).one()
         return int(dishes), int(amount)
 
-    def _check_limits(self, current_dishes: int, current_amount: int, add_dishes: int, add_amount: int) -> None:
+    def check_limits(self, current_dishes: int, current_amount: int, add_dishes: int, add_amount: int) -> None:
         if current_dishes + add_dishes > self.settings.max_cart_items:
             raise BadRequestError("Too many dishes")
         if current_amount + add_amount > self.settings.max_cart_amount:

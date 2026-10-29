@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.db.enums import OrderStatus
 from app.schemas.common import OkResponse
@@ -69,3 +69,14 @@ class HistoryOrderOut(BaseModel):
 
 class HistoryResponse(OkResponse):
     history: list[HistoryOrderOut]
+
+
+class PickupTokenRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    pickup_token: str = Field(min_length=1, max_length=2048)
+
+
+class PickupTokenResponse(BaseModel):
+    pickup_token: str
+    expires_at: datetime

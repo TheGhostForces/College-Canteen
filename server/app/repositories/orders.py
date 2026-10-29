@@ -16,6 +16,7 @@ from app.db.models import (
     ShoppingCartDishesOrm,
     ShoppingCartOrm,
 )
+from app.repositories.baskets import BasketRepository
 
 
 class OrdersRepository:
@@ -26,6 +27,8 @@ class OrdersRepository:
 
     # ---- оформление и отмена ----
     async def create_from_basket(self, student_id: int) -> dict:
+        basket_repo = BasketRepository(self.session)
+        institution_id = await basket_repo.lock_student(student_id)
         active = await self.session.execute(
             select(OrderOrm.id).where(
                 OrderOrm.student_id == student_id, OrderOrm.order_status == OrderStatus.IN_PROGRESS
@@ -44,8 +47,8 @@ class OrdersRepository:
             (
                 await self.session.execute(
                     select(ShoppingCartDishesOrm)
-                    .options(selectinload(ShoppingCartDishesOrm.schedule_dish).selectinload(ScheduleDishesOrm.dish))
                     .where(ShoppingCartDishesOrm.shoppingcart_id == basket.id)
+                    .execution_options(populate_existing=True)
                 )
             )
             .scalars()
@@ -55,19 +58,44 @@ class OrdersRepository:
             raise BadRequestError("Cart is empty")
 
         pickup_date = tomorrow_local()
+        # Stable lock order avoids deadlocks between students buying the same
+        # dishes. Refresh after waiting: stock may have changed while blocked.
+        schedules = (
+            (
+                await self.session.execute(
+                    select(ScheduleDishesOrm)
+                    .where(ScheduleDishesOrm.id.in_([item.schedule_dish_id for item in items]))
+                    .options(joinedload(ScheduleDishesOrm.dish))
+                    .order_by(ScheduleDishesOrm.id)
+                    .with_for_update(of=ScheduleDishesOrm)
+                    .execution_options(populate_existing=True)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        schedule_by_id = {schedule.id: schedule for schedule in schedules}
+        if any(schedule.dish.institution_id != institution_id for schedule in schedules):
+            raise BadRequestError("This dish does not belong to this student")
         order_lines: list[dict] = []
         reserve: dict[int, int] = {}  # schedule_dish_id -> сколько порций списать
         to_remove: list[int] = []
         to_adjust: dict[int, int] = {}
 
         for item in items:
-            schedule = item.schedule_dish
+            schedule = schedule_by_id[item.schedule_dish_id]
             if schedule.date != pickup_date or not schedule.dish.is_active or schedule.quantity <= 0:
                 to_remove.append(item.id)
             elif item.cart_quantity > schedule.quantity:
                 to_adjust[item.id] = schedule.quantity
             else:
-                order_lines.append({"cart_quantity": item.cart_quantity, "dish_id": schedule.dish_id})
+                order_lines.append(
+                    {
+                        "cart_quantity": item.cart_quantity,
+                        "dish_id": schedule.dish_id,
+                        "unit_price": schedule.dish.fixed_price,
+                    }
+                )
                 reserve[schedule.id] = reserve.get(schedule.id, 0) + item.cart_quantity
 
         if to_adjust or to_remove:
@@ -93,6 +121,14 @@ class OrdersRepository:
         if not order_lines:
             raise BadRequestError("No available dishes found in cart for tomorrow's order")
 
+        # Цены и лимиты могли измениться после добавления блюда в корзину.
+        basket_repo.check_limits(
+            0,
+            0,
+            sum(line["cart_quantity"] for line in order_lines),
+            sum(line["cart_quantity"] * line["unit_price"] for line in order_lines),
+        )
+
         order = OrderOrm(
             student_id=student_id,
             order_status=OrderStatus.IN_PROGRESS,
@@ -107,7 +143,7 @@ class OrdersRepository:
         await self.session.execute(insert(OrderDishOrm), [{**line, "order_id": order.id} for line in order_lines])
 
         # условное списание защищает от гонок: остаток не уйдёт в минус
-        for schedule_id, quantity in reserve.items():
+        for schedule_id, quantity in sorted(reserve.items()):
             result = await self.session.execute(
                 update(ScheduleDishesOrm)
                 .where(ScheduleDishesOrm.id == schedule_id, ScheduleDishesOrm.quantity >= quantity)
@@ -126,6 +162,7 @@ class OrdersRepository:
 
     async def cancel_todays_order(self, student_id: int) -> None:
         """Отмена заказа, оформленного сегодня; порции возвращаются в остаток."""
+        await BasketRepository(self.session).lock_student(student_id)
         orders = (
             (
                 await self.session.execute(
@@ -136,6 +173,8 @@ class OrdersRepository:
                         OrderOrm.pickup_date == tomorrow_local(),
                     )
                     .options(selectinload(OrderOrm.order_dishes))
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
                 )
             )
             .scalars()
@@ -145,12 +184,27 @@ class OrdersRepository:
             raise NotFoundError("No order created today in progress found for this student")
 
         for order in orders:
-            for line in order.order_dishes:
-                await self.session.execute(
-                    update(ScheduleDishesOrm)
-                    .where(ScheduleDishesOrm.dish_id == line.dish_id, ScheduleDishesOrm.date == order.pickup_date)
-                    .values(quantity=ScheduleDishesOrm.quantity + line.cart_quantity)
+            schedules = (
+                (
+                    await self.session.execute(
+                        select(ScheduleDishesOrm)
+                        .where(
+                            ScheduleDishesOrm.dish_id.in_([line.dish_id for line in order.order_dishes]),
+                            ScheduleDishesOrm.date == order.pickup_date,
+                        )
+                        .order_by(ScheduleDishesOrm.id)
+                        .with_for_update()
+                        .execution_options(populate_existing=True)
+                    )
                 )
+                .scalars()
+                .all()
+            )
+            quantities: dict[int, int] = {}
+            for line in order.order_dishes:
+                quantities[line.dish_id] = quantities.get(line.dish_id, 0) + line.cart_quantity
+            for schedule in schedules:
+                schedule.quantity += quantities[schedule.dish_id]
             order.order_status = OrderStatus.CANCELLED
             order.updated_at = now_local()
         await self.session.commit()
@@ -204,8 +258,8 @@ class OrdersRepository:
                     "dish_name": line.dish.dish_name,
                     "institution_id": line.dish.institution_id,
                     "category": line.dish.category,
-                    "fixed_price": line.dish.fixed_price,
-                    "total_price": line.cart_quantity * line.dish.fixed_price,
+                    "fixed_price": line.unit_price,
+                    "total_price": line.cart_quantity * line.unit_price,
                     "img_url": line.dish.img_url,
                     "created_at": line.order.created_at,
                 }
@@ -227,7 +281,7 @@ class OrdersRepository:
                 DishesOrm.dish_name,
                 DishesOrm.institution_id,
                 DishesOrm.category,
-                DishesOrm.fixed_price,
+                OrderDishOrm.unit_price,
                 DishesOrm.img_url,
             )
             .join(OrderDishOrm, OrderOrm.id == OrderDishOrm.order_id)
@@ -249,8 +303,8 @@ class OrdersRepository:
                     "dish_name": row.dish_name,
                     "institution_id": row.institution_id,
                     "category": row.category,
-                    "fixed_price": row.fixed_price,
-                    "total_price": row.cart_quantity * row.fixed_price,
+                    "fixed_price": row.unit_price,
+                    "total_price": row.cart_quantity * row.unit_price,
                     "img_url": row.img_url,
                     "created_at": row.created_at,
                 }
@@ -308,8 +362,8 @@ class OrdersRepository:
                         "dish_id": line.dish.id,
                         "quantity": line.cart_quantity,
                         "dish_name": line.dish.dish_name,
-                        "fixed_price": line.dish.fixed_price,
-                        "total_price": line.cart_quantity * line.dish.fixed_price,
+                        "fixed_price": line.unit_price,
+                        "total_price": line.cart_quantity * line.unit_price,
                         "date": order.updated_at.date(),
                     }
                     for line in order.order_dishes
