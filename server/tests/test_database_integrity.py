@@ -58,7 +58,8 @@ async def _basket(method, *args):
 
 async def _orders(method, *args):
     async with SessionFactory() as session:
-        return await getattr(OrdersRepository(session), method)(*args)
+        kwargs = {"allow_legacy": True} if method == "create_from_basket" else {}
+        return await getattr(OrdersRepository(session), method)(*args, **kwargs)
 
 
 async def _stock(schedule_id):
@@ -79,11 +80,11 @@ async def _cart_quantity(student_id):
     ("table", "assignment"),
     [
         ("Users", "role = 'superuser'"),
-        ("Students", "date_end = date_start - 1"),
+        ("Students", "study_end_year = study_start_year - 1"),
         ("TemporaryCode", "attempts = -1"),
         ("TemporaryCode", "expires_at = created_at"),
         ("Dishes", "fixed_price = 0"),
-        ("Dishes", "category = 'unknown'"),
+        ("Dishes", "category = ''"),
         ("ScheduleDishes", "quantity = -1"),
         ("ScheduleDishes", "quantity = total_quantity + 1"),
         ("ShoppingCartDishes", "cart_quantity = 0"),
@@ -182,25 +183,19 @@ async def test_cart_student_is_unique_and_concurrent_creation_is_idempotent(db_m
         await session.rollback()
 
 
-async def test_only_one_active_order_even_for_different_pickup_dates(db_menu):
+async def test_student_can_have_active_orders_on_different_pickup_dates(db_menu):
     student = db_menu["students"][0]
     await _basket("add_dish", student, db_menu["dishes"][0], 1)
     await _orders("create_from_basket", student)
     async with SessionFactory() as session:
-        # Same student on a different date is still a second active order.
-        with pytest.raises(IntegrityError):
-            await session.execute(
-                text(
-                    'INSERT INTO "Order" (order_number, order_status, created_at, pickup_date, student_id) '
-                    "VALUES ('OTHER', 'IN_PROGRESS', now(), current_date + 2, :student)"
-                ),
-                {"student": student},
-            )
-            await session.commit()
-        await session.rollback()
-    await _orders("cancel_todays_order", student)
-    await _basket("add_dish", student, db_menu["dishes"][0], 1)
-    await _orders("create_from_basket", student)
+        await session.execute(
+            text(
+                'INSERT INTO "Order" (order_number, order_status, created_at, pickup_date, student_id) '
+                "VALUES ('OTHER', 'IN_PROGRESS', now(), current_date + 2, :student)"
+            ),
+            {"student": student},
+        )
+        await session.commit()
 
 
 async def test_repository_rejects_invalid_quantities(db_menu):
@@ -322,12 +317,58 @@ async def test_two_students_cannot_oversell_stock(db_menu):
     assert await _stock(schedule) == 2
 
 
+async def test_migration_adds_year_and_nutrition_columns():
+    async with SessionFactory() as session:
+        rows = await session.execute(
+            text("""
+            SELECT table_name, column_name FROM information_schema.columns
+            WHERE table_schema = current_schema() AND table_name IN ('Students', 'Dishes')
+        """)
+        )
+        columns = set(rows.all())
+        assert {("Students", "study_start_year"), ("Students", "study_end_year")} <= columns
+        assert {
+            ("Dishes", name) for name in ("serving_weight_g", "energy_kcal", "protein_g", "fat_g", "carbohydrates_g")
+        } <= columns
+
+
+async def test_database_category_outside_initial_list_appears_in_catalog(clients, world):
+    async with SessionFactory() as session:
+        session.add(DishesOrm(dish_name="Salad", category="Салаты", fixed_price=50, institution_id=world.inst1))
+        await session.commit()
+    catalog = (await clients.admin.get("/admin/dishes")).json()["dishes"]
+    assert any(d["dish_name"] == "Salad" and d["category"] == "Салаты" for d in catalog)
+    assert not (await clients.student.get("/dishes/dishes_tomorrow")).json()["dishes"]
+
+
 async def test_metadata_matches_migration_head():
     await asyncio.to_thread(command.check, Config("alembic.ini"))
 
 
 async def _migrate(revision):
     await asyncio.to_thread(command.upgrade, Config("alembic.ini"), revision)
+
+
+@pytest.fixture
+async def legacy_database():
+    await asyncio.to_thread(command.downgrade, Config("alembic.ini"), "0002")
+    try:
+        async with SessionFactory() as session:
+            for statement in (
+                "INSERT INTO \"EducationInstitution\" (id, name) VALUES (1, 'College')",
+                "INSERT INTO \"Users\" (id, email, role, institution_id) VALUES (1, 'stud@x.ru', 'student', 1), (2, 'stud2@x.ru', 'student', 1)",
+                "INSERT INTO \"Students\" (id, full_name, group_name, date_start, date_end, rating, user_id) VALUES (1, 'One', 'G', '2024-01-01', '2030-01-01', 0, 1), (2, 'Two', 'G', '2024-01-01', '2030-01-01', 0, 2)",
+                "INSERT INTO \"Dishes\" (id, dish_name, category, fixed_price, is_active, institution_id) VALUES (1, 'Soup', 'Первое', 100, true, 1)",
+                'INSERT INTO "ScheduleDishes" (id, date, quantity, total_quantity, dish_id) VALUES (1, current_date + 1, 20, 20, 1)',
+            ):
+                await session.execute(text(statement))
+            await session.commit()
+        yield
+    finally:
+        async with SessionFactory() as session:
+            await session.execute(text('TRUNCATE "EducationInstitution" RESTART IDENTITY CASCADE'))
+            await session.commit()
+        await _migrate("head")
 
 
 @pytest.mark.parametrize(
@@ -379,34 +420,103 @@ async def _migrate(revision):
         ),
     ],
 )
-async def test_migration_refuses_legacy_data_without_silent_repairs(db_menu, invalid_sql, repair_sql, message):
-    await asyncio.to_thread(command.downgrade, Config("alembic.ini"), "0002")
+async def test_migration_refuses_legacy_data_without_silent_repairs(legacy_database, invalid_sql, repair_sql, message):
     try:
         async with SessionFactory() as session:
             for statement in invalid_sql.split("; "):
                 await session.execute(text(statement))
             await session.commit()
         with pytest.raises(RuntimeError, match=message):
-            await _migrate("head")
+            await _migrate("0003")
         async with SessionFactory() as session:
             assert await session.scalar(text("SELECT version_num FROM alembic_version")) == "0002"
             # The retry must still fail: the first attempt did not silently repair anything.
         with pytest.raises(RuntimeError, match=message):
-            await _migrate("head")
+            await _migrate("0003")
     finally:
         async with SessionFactory() as session:
             await session.execute(text(repair_sql))
             await session.commit()
-        await _migrate("head")
+        await _migrate("0003")
 
 
-async def test_migration_backfills_legacy_order_prices(db_menu):
-    student, dish = db_menu["students"][0], db_menu["dishes"][0]
-    await _basket("add_dish", student, dish, 1)
-    await _orders("create_from_basket", student)
-    await asyncio.to_thread(command.downgrade, Config("alembic.ini"), "0002")
+@pytest.mark.parametrize("legacy_kind", ["stock", "active_order"])
+async def test_buffet_upgrade_refuses_unmigrated_legacy_state(world, legacy_kind):
+    await asyncio.to_thread(command.downgrade, Config("alembic.ini"), "0005")
     try:
+        async with SessionFactory() as session:
+            if legacy_kind == "stock":
+                await session.execute(
+                    text(
+                        'INSERT INTO "Dishes" (dish_name, category, fixed_price, institution_id) '
+                        "VALUES ('Legacy', 'Food', 20, :institution)"
+                    ),
+                    {"institution": world.inst1},
+                )
+                await session.execute(
+                    text(
+                        'INSERT INTO "ScheduleDishes" (date, quantity, total_quantity, dish_id) '
+                        "SELECT current_date + 1, 1, 1, id FROM \"Dishes\" WHERE dish_name = 'Legacy'"
+                    )
+                )
+            else:
+                await session.execute(
+                    text(
+                        'INSERT INTO "Order" (student_id, order_number, order_status, created_at, pickup_date) '
+                        "SELECT id, 'OLD', 'IN_PROGRESS', now(), current_date + 1 FROM \"Students\" LIMIT 1"
+                    )
+                )
+            await session.commit()
+        with pytest.raises(RuntimeError, match="legacy"):
+            await _migrate("0006")
+        async with SessionFactory() as session:
+            assert await session.scalar(text("SELECT version_num FROM alembic_version")) == "0005"
+            assert await session.scalar(text("SELECT to_regclass('\"BuffetOffering\"')")) is None
+            table = '"ScheduleDishes"' if legacy_kind == "stock" else '"Order"'
+            assert await session.scalar(text(f"SELECT count(*) FROM {table}")) == 1
+    finally:
+        async with SessionFactory() as session:
+            await session.execute(text('DELETE FROM "ScheduleDishes"'))
+            await session.execute(text('DELETE FROM "Order"'))
+            await session.commit()
         await _migrate("head")
+
+
+async def test_buffet_downgrade_refuses_multiple_active_orders(world):
+    async with SessionFactory() as session:
+        await session.execute(
+            text(
+                'INSERT INTO "Order" (student_id, order_number, order_status, created_at, pickup_date) '
+                "SELECT id, 'A', 'IN_PROGRESS', now(), current_date + 1 FROM \"Students\" LIMIT 1"
+            )
+        )
+        await session.execute(
+            text(
+                'INSERT INTO "Order" (student_id, order_number, order_status, created_at, pickup_date) '
+                "SELECT id, 'B', 'IN_PROGRESS', now(), current_date + 2 FROM \"Students\" LIMIT 1"
+            )
+        )
+        await session.commit()
+    with pytest.raises(RuntimeError, match="multiple active orders"):
+        await asyncio.to_thread(command.downgrade, Config("alembic.ini"), "0005")
+    async with SessionFactory() as session:
+        assert await session.scalar(text("SELECT version_num FROM alembic_version")) == "0006"
+        assert await session.scalar(text('SELECT count(*) FROM "Order"')) == 2
+        assert await session.scalar(text("SELECT to_regclass('\"TypedOrderItem\"')")) is not None
+
+
+async def test_migration_backfills_legacy_order_prices(legacy_database):
+    async with SessionFactory() as session:
+        await session.execute(
+            text(
+                "INSERT INTO \"Order\" (id, student_id, order_number, order_status, created_at, pickup_date) VALUES (1, 1, 'LEGACY', 'IN_PROGRESS', now(), current_date + 1)"
+            )
+        )
+        await session.execute(text('INSERT INTO "OrderDish" (order_id, dish_id, cart_quantity) VALUES (1, 1, 1)'))
+        await session.commit()
+    dish = 1
+    try:
+        await _migrate("0003")
         async with SessionFactory() as session:
             [price] = list((await session.scalars(select(OrderDishOrm.unit_price))).all())
             assert price == 100
@@ -414,4 +524,4 @@ async def test_migration_backfills_legacy_order_prices(db_menu):
             await session.commit()
             assert await session.scalar(select(OrderDishOrm.unit_price)) == 100
     finally:
-        await _migrate("head")
+        await _migrate("0003")

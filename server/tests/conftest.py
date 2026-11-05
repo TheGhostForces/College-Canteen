@@ -5,10 +5,10 @@
 
 import asyncio
 import os
-from datetime import date
 
 os.environ.setdefault("POSTGRES_DB", "canteen_test")
-os.environ.setdefault("POSTGRES_PASSWORD", "postgres")
+if os.environ.get("CANTEEN_TEST_PGPASS", "").lower() not in ("1", "true", "yes", "on"):
+    os.environ.setdefault("POSTGRES_PASSWORD", "postgres")
 os.environ.setdefault("SECRET_KEY", "test-secret-key-test-secret-key-0123456789")
 os.environ["COOKIE_SECURE"] = "false"
 os.environ["ENABLE_DOCS"] = "false"
@@ -44,7 +44,7 @@ TABLES = [
 def _admin_dsn(database: str) -> dict:
     return dict(
         user=SETTINGS.postgres_user,
-        password=SETTINGS.postgres_password.get_secret_value(),
+        password=SETTINGS.postgres_password.get_secret_value() if SETTINGS.postgres_password is not None else None,
         host=SETTINGS.postgres_host,
         port=SETTINGS.postgres_port,
         database=database,
@@ -52,11 +52,15 @@ def _admin_dsn(database: str) -> dict:
 
 
 async def _ensure_database() -> None:
-    conn = await asyncpg.connect(**_admin_dsn("postgres"))
+    # Tests downgrade and truncate the target; never connect to another database.
+    if (SETTINGS.postgres_host, SETTINGS.postgres_port, SETTINGS.postgres_db, SETTINGS.postgres_user) != (
+        "localhost", 5432, "test", "postgres"
+    ):
+        raise RuntimeError("Tests require the explicitly authorized localhost:5432/test database")
+    conn = await asyncpg.connect(**_admin_dsn(SETTINGS.postgres_db))
     try:
-        exists = await conn.fetchval("SELECT 1 FROM pg_database WHERE datname = $1", SETTINGS.postgres_db)
-        if not exists:
-            await conn.execute(f'CREATE DATABASE "{SETTINGS.postgres_db}"')
+        if await conn.fetchval("SELECT current_database()") != "test":
+            raise RuntimeError("Unexpected test database")
     finally:
         await conn.close()
 
@@ -64,8 +68,10 @@ async def _ensure_database() -> None:
 async def _truncate() -> None:
     conn = await asyncpg.connect(**_admin_dsn(SETTINGS.postgres_db))
     try:
-        names = ", ".join(f'"{t}"' for t in TABLES)
-        await conn.execute(f"TRUNCATE {names} RESTART IDENTITY CASCADE")
+        existing = [t for t in TABLES if await conn.fetchval('SELECT to_regclass($1)', f'"{t}"')]
+        if existing:
+            names = ", ".join(f'"{t}"' for t in existing)
+            await conn.execute(f"TRUNCATE {names} RESTART IDENTITY CASCADE")
     finally:
         await conn.close()
 
@@ -73,6 +79,7 @@ async def _truncate() -> None:
 @pytest.fixture(scope="session", autouse=True)
 def database():
     asyncio.run(_ensure_database())
+    asyncio.run(_truncate())
     config = Config("alembic.ini")
     command.downgrade(config, "base")
     command.upgrade(config, "head")
@@ -110,7 +117,7 @@ async def world() -> World:
         def student(email, inst):
             user = models.UsersOrm(email=email, role="student", institution_id=inst)
             user.student = models.StudentsOrm(
-                full_name=f"Student {email}", group_name="G-1", date_start=date(2024, 1, 1), date_end=date(2030, 1, 1)
+                full_name=f"Student {email}", group_name="G-1", study_start_year=2024, study_end_year=2030
             )
             return user
 
@@ -198,10 +205,14 @@ async def menu(clients, world):
     )
     assert r.status_code == 200, r.text
     soup, tea = r.json()["Result"]["created_dish_ids"]
-    r = await clients.provider.put(
-        "/dishes/dishes",
-        params={"institution_id": world.inst1, "target_date": tomorrow_local().isoformat()},
-        json={"items": [{"dish_id": soup, "cart_quantity": 5}, {"dish_id": tea, "cart_quantity": 3}]},
-    )
-    assert r.status_code == 200, r.text
+    # Seed legacy schedules directly; suppliers can no longer mutate daily plans.
+    from app.repositories.dishes import DishesRepository
+    from app.schemas.dishes import DishPlan
+
+    async with SessionFactory() as session:
+        await DishesRepository(session).set_plan_for_day(
+            world.inst1,
+            DishPlan(items=[{"dish_id": soup, "cart_quantity": 5}, {"dish_id": tea, "cart_quantity": 3}]),
+            tomorrow_local(),
+        )
     return {"soup": soup, "tea": tea}

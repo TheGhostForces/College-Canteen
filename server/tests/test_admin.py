@@ -1,5 +1,3 @@
-from datetime import date
-
 import pytest
 from sqlalchemy import func, select
 
@@ -10,8 +8,8 @@ from app.db.session import SessionFactory
 STUDENT = {
     "full_name": "Иван Иванов",
     "group_name": "ИС-21",
-    "date_start": "2024-09-01",
-    "date_end": "2028-06-30",
+    "study_start_year": 2024,
+    "study_end_year": 2028,
 }
 
 
@@ -87,14 +85,28 @@ async def test_create_only_in_own_institution(clients, world, role):
         if role == "student":
             assert profile.full_name == STUDENT["full_name"]
             assert profile.group_name == STUDENT["group_name"]
-            assert profile.date_start == date(2024, 9, 1)
-            assert profile.date_end == date(2028, 6, 30)
+            assert profile.study_start_year == 2024
+            assert profile.study_end_year == 2028
         else:
             assert profile is None
     own = (await clients.admin.get("/admin/users")).json()["users"]
     assert any(u["id"] == user_id for u in own)
     other = (await clients.admin2.get("/admin/users")).json()["users"]
     assert all(u["id"] != user_id for u in other)
+
+
+async def test_student_study_years_round_trip_and_validate(clients):
+    student = {"full_name": "Year Student", "group_name": "G-1", "study_start_year": 2024, "study_end_year": 2028}
+    body = user_body("student", "years@example.ru")
+    body["student"] = student
+    response = await clients.admin.post("/admin/user", json=body)
+    assert response.status_code == 200, response.text
+    users = (await clients.admin.get("/admin/users")).json()["users"]
+    profile = next(u["student"] for u in users if u["id"] == response.json()["user_id"])
+    assert (profile["study_start_year"], profile["study_end_year"]) == (2024, 2028)
+    body = user_body("student", "bad-years@example.ru")
+    body["student"] = {**student, "study_end_year": 2023}
+    assert (await clients.admin.post("/admin/user", json=body)).status_code == 422
 
 
 async def test_create_without_institution_and_student_can_login(clients, login, world):
@@ -123,7 +135,7 @@ async def test_admin_creation_is_forbidden_and_existing_email_unchanged(clients)
 async def test_missing_or_invalid_student_does_not_create_user(clients):
     response = await clients.admin.post("/admin/user", json=user_body("student"))
     assert response.status_code == 400
-    for changes in ({"date_end": "2020-01-01"}, {"full_name": "  "}, {"group_name": "  "}):
+    for changes in ({"study_end_year": 2020}, {"full_name": "  "}, {"group_name": "  "}):
         body = user_body("student")
         body["student"] = {**STUDENT, **changes}
         assert (await clients.admin.post("/admin/user", json=body)).status_code == 422
@@ -164,6 +176,59 @@ async def test_dish_list_edit_and_soft_delete_are_isolated(clients, world):
         dish = await session.get(DishesOrm, dish_id)
         assert dish is not None and not dish.is_active and dish.fixed_price == 60
         assert dish.institution_id == world.inst1
+
+
+async def test_demo_seed_creates_student_with_study_years(monkeypatch):
+    from app.core.config import get_settings
+    from app.seed import seed
+
+    monkeypatch.setattr(get_settings(), "mail_backend", "console")
+    await seed()
+    async with SessionFactory() as session:
+        profile = await session.scalar(select(StudentsOrm))
+        assert profile.study_end_year >= profile.study_start_year
+
+
+async def test_demo_seed_creates_orderable_recurring_menu_idempotently(monkeypatch, anon):
+    from datetime import UTC, date, datetime
+
+    from app.core.config import get_settings
+    from app.core.security import create_access_token
+    from app.db.models import BuffetOfferingOrm, MealSetOrm
+    from app.seed import seed
+
+    monkeypatch.setattr(get_settings(), "mail_backend", "console")
+    monkeypatch.setattr("app.seed.today_local", lambda: date(2026, 11, 2))
+    instant = datetime(2026, 11, 2, 10, tzinfo=UTC)
+    for target in (
+        "app.api.routers.dishes.menu_now",
+        "app.repositories.baskets.menu_now",
+        "app.repositories.orders.menu_now",
+    ):
+        monkeypatch.setattr(target, lambda: instant)
+    await seed()
+    await seed()
+    async with SessionFactory() as session:
+        student = await session.scalar(select(UsersOrm).where(UsersOrm.email == "student@example.com"))
+        sets = (await session.scalars(select(MealSetOrm))).all()
+        buffet = (await session.scalars(select(BuffetOfferingOrm))).all()
+        assert len(sets) == 10 and len(buffet) >= 1
+        assert all(meal.components for meal in sets)
+        token = create_access_token(student.id, student.role)
+    anon.cookies.set("access_token", token)
+    response = await anon.get("/dishes/dishes_tomorrow")
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["pickup_date"] == "2026-11-03"
+    assert data["sets"] and data["dishes"]
+    for item in (
+        {"item_type": "set", "meal_set_id": data["sets"][0]["id"], "cart_quantity": 1},
+        {"item_type": "buffet", "buffet_offering_id": data["dishes"][0]["id"], "cart_quantity": 1},
+    ):
+        result = await anon.post("/basket/dish", json=item)
+        assert result.status_code == 200, result.text
+    result = await anon.post("/orders/order")
+    assert result.status_code == 200, result.text
 
 
 async def test_bootstrap_creates_only_admin_and_institution():

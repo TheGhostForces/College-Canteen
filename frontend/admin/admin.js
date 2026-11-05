@@ -85,7 +85,7 @@ async function loadUsers() {
             cell(row, user.email);
             cell(row, roles[user.role] || user.role);
             const s = user.student;
-            cell(row, s ? `${s.full_name} · ${s.group_name} · ${s.date_start} — ${s.date_end}` : null);
+            cell(row, s ? `${s.full_name} · ${s.group_name} · ${s.study_start_year} — ${s.study_end_year}` : null);
             byId('users-body').append(row);
         }
         byId('users-empty').hidden = data.users.length !== 0;
@@ -106,7 +106,7 @@ function resetDish() {
 
 function editDish(dish) {
     editingId = dish.id;
-    for (const name of ['dish_name', 'category', 'fixed_price', 'img_url']) {
+    for (const name of ['dish_name', 'category', 'fixed_price', 'img_url', 'serving_weight_g', 'energy_kcal', 'protein_g', 'fat_g', 'carbohydrates_g']) {
         dishForm.elements[name].value = dish[name] ?? '';
     }
     byId('dish-form-title').textContent = `Редактировать блюдо №${dish.id}`;
@@ -117,6 +117,11 @@ function editDish(dish) {
 
 async function loadDishes() {
     const data = await api('/admin/dishes');
+    byId('categories').replaceChildren(...[...new Set(data.dishes.map(dish => dish.category))].map(category => {
+        const option = document.createElement('option');
+        option.value = category;
+        return option;
+    }));
     byId('dishes-body').replaceChildren();
     for (const dish of data.dishes) {
         const row = document.createElement('tr');
@@ -128,12 +133,82 @@ async function loadDishes() {
             await api(`/dishes/dish?dish_ids=${encodeURIComponent(dish.id)}`, { method: 'DELETE' });
             if (editingId === dish.id) resetDish();
             message('Блюдо убрано из меню.');
-            await loadDishes();
+            await Promise.all([loadDishes(), loadSets()]);
         }, true));
         byId('dishes-body').append(row);
     }
     byId('dishes-empty').hidden = data.dishes.length !== 0;
 }
+
+const setForm = byId('set-form');
+let editingSetId = null;
+const weekdays = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница'];
+const mealTypes = { breakfast: 'Завтрак', lunch: 'Обед', afternoon_snack: 'Полдник', dinner: 'Ужин' };
+
+function resetSet() {
+    editingSetId = null;
+    setForm.reset();
+    byId('set-form-title').textContent = 'Добавить комплекс';
+    byId('cancel-set').hidden = true;
+}
+
+async function loadSets() {
+    const [data, catalog] = await Promise.all([api('/dishes/meal-sets'), api('/admin/dishes')]);
+    byId('anchor-form').elements.cycle_start_monday.value = data.cycle_start_monday || '';
+    const select = setForm.elements.dish_ids;
+    const selected = new Set([...select.selectedOptions].map(option => option.value));
+    select.replaceChildren(...catalog.dishes.map(dish => {
+        const option = document.createElement('option');
+        option.value = String(dish.id);
+        option.textContent = dish.dish_name;
+        option.selected = selected.has(option.value);
+        return option;
+    }));
+    byId('sets-body').replaceChildren();
+    for (const meal of data.sets) {
+        const row = document.createElement('tr');
+        for (const value of [meal.cycle_week, weekdays[meal.weekday], mealTypes[meal.meal_type], meal.components.map(d => d.dish_name).join(', '), meal.price]) cell(row, value);
+        const controls = cell(row, '');
+        controls.append(action('Изменить', () => {
+            editingSetId = meal.id;
+            for (const name of ['cycle_week', 'weekday', 'meal_type', 'price']) setForm.elements[name].value = meal[name];
+            for (const option of select.options) option.selected = meal.dish_ids.includes(Number(option.value));
+            byId('set-form-title').textContent = `Редактировать комплекс №${meal.id}`;
+            byId('cancel-set').hidden = false;
+            setForm.elements.cycle_week.focus();
+        }));
+        controls.append(action('Удалить', async () => {
+            if (!window.confirm('Удалить комплекс?')) return;
+            await api(`/dishes/meal-sets/${encodeURIComponent(meal.id)}`, { method: 'DELETE' });
+            if (editingSetId === meal.id) resetSet();
+            await loadSets();
+            message('Комплекс удалён.');
+        }, true));
+        byId('sets-body').append(row);
+    }
+    byId('sets-empty').hidden = data.sets.length !== 0;
+}
+
+byId('anchor-form').addEventListener('submit', event => {
+    event.preventDefault();
+    busy(event.currentTarget.querySelector('button'), async () => {
+        await api('/dishes/cycle-anchor', { method: 'PUT', body: JSON.stringify({ cycle_start_monday: byId('anchor-form').elements.cycle_start_monday.value }) });
+        message('Дата начала цикла сохранена.');
+    });
+});
+setForm.addEventListener('submit', event => {
+    event.preventDefault();
+    busy(setForm.querySelector('[type="submit"]'), async () => {
+        const body = { cycle_week: Number(setForm.elements.cycle_week.value), weekday: Number(setForm.elements.weekday.value), meal_type: setForm.elements.meal_type.value, price: Number(setForm.elements.price.value), dish_ids: [...setForm.elements.dish_ids.selectedOptions].map(option => Number(option.value)) };
+        const path = editingSetId === null ? '/dishes/meal-sets' : `/dishes/meal-sets/${encodeURIComponent(editingSetId)}`;
+        await api(path, { method: editingSetId === null ? 'POST' : 'PUT', body: JSON.stringify(body) });
+        resetSet();
+        await loadSets();
+        message('Комплекс сохранён.');
+    });
+});
+byId('cancel-set').addEventListener('click', resetSet);
+byId('reload-sets').addEventListener('click', () => busy(byId('reload-sets'), loadSets));
 
 function toggleStudent() {
     const enabled = userForm.elements.role.value === 'student';
@@ -148,8 +223,10 @@ userForm.addEventListener('submit', event => {
         const values = new FormData(userForm);
         const body = { user: { email: values.get('email').trim(), role: values.get('role') } };
         if (body.user.role === 'student') {
-            if (values.get('date_end') < values.get('date_start')) throw new Error('Окончание обучения не может быть раньше начала.');
-            body.student = Object.fromEntries(['full_name', 'group_name', 'date_start', 'date_end'].map(name => [name, values.get(name).trim()]));
+            if (Number(values.get('study_end_year')) < Number(values.get('study_start_year'))) throw new Error('Окончание обучения не может быть раньше начала.');
+            body.student = Object.fromEntries(['full_name', 'group_name', 'study_start_year', 'study_end_year'].map(name => [name, values.get(name).trim()]));
+            body.student.study_start_year = Number(body.student.study_start_year);
+            body.student.study_end_year = Number(body.student.study_end_year);
             if (!body.student.full_name || !body.student.group_name) throw new Error('Заполните ФИО и группу.');
         }
         await api('/admin/user', { method: 'POST', body: JSON.stringify(body) });
@@ -170,6 +247,7 @@ dishForm.addEventListener('submit', event => {
             category: values.get('category'),
             fixed_price: Number(values.get('fixed_price')),
         };
+        for (const name of ['serving_weight_g', 'energy_kcal', 'protein_g', 'fat_g', 'carbohydrates_g']) data[name] = Number(values.get(name));
         if (!data.dish_name) throw new Error('Введите название блюда.');
         const image = values.get('img_url').trim();
         if (image) {
@@ -185,7 +263,7 @@ dishForm.addEventListener('submit', event => {
         }
         resetDish();
         message('Блюдо сохранено.');
-        await loadDishes();
+        await Promise.all([loadDishes(), loadSets()]);
     });
 });
 
@@ -209,7 +287,7 @@ try {
     byId('institution').textContent = `${me.institution.name} · ID ${me.institution.id}`;
     byId('account').textContent = `Вы вошли как ${me.email}`;
     byId('panel').hidden = false;
-    const results = await Promise.allSettled([loadUsers(), loadDishes()]);
+    const results = await Promise.allSettled([loadUsers(), loadDishes(), loadSets()]);
     const failed = results.find(result => result.status === 'rejected');
     if (failed) throw failed.reason;
     message('Данные загружены.');

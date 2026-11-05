@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, shrink-to-fit=no">
-    
+
     <title>Планирование заказов</title>
-    
+
     <link rel="stylesheet" href="../styles/styles.css">
     <link rel="stylesheet" href="../styles/normal.css">
 
@@ -214,11 +214,11 @@
 
 <body id="order_packaging">
     <input type="checkbox" id="menuToggle" class="checkbox">
-    
+
     <div id="div_logo">
         <img src="../png/logo_with_text.png" alt="">
     </div>
-    
+
     <header>
         <a href="./meal_planning.html"><img src="../png/dishes_date.png" alt="Картинка"></a>
         <a href="./order_packaging.html"><img id="order_packaging_img" src="../png/order_packaging.png" alt="Картинка"></a>
@@ -263,7 +263,7 @@
         show_message,
         authRequiredAsync,
         escapeData,
-        creating_application_elements, 
+        creating_application_elements,
     } from '../js/common.js'
 
     import { createDropDownMenuCard } from '../js/drop_down_menu_card.js'
@@ -341,7 +341,14 @@
                 throw new Error('Заведение не выбрано')
             }
 
-            const response = await fetch(`/api/orders/orders?institution_id=${institution_id}`, {
+            const dateResponse = await fetch('/api/orders/next-pickup-date', { credentials: 'include', cache: 'no-store' })
+            if (!dateResponse.ok) throw new Error('Не удалось получить дату выдачи')
+            const {pickup_date} = await dateResponse.json()
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(pickup_date)) throw new Error('Некорректная дата выдачи')
+            summary_title.textContent = `Сводка по блюдам — ${pickup_date}`
+            orders_title.textContent = `Заказы — ${pickup_date}`
+            const params = new URLSearchParams({institution_id, target_date: pickup_date})
+            const response = await fetch(`/api/orders/orders?${params}`, {
                 method: 'GET',
                 credentials: 'include'
             })
@@ -356,7 +363,7 @@
                 resetView()
                 container_with_data_from_api.innerHTML = `
                     <p style="text-align: center; padding: 20px;">
-                        Нет данных на завтра
+                        Нет данных на следующий день выдачи
                     </p>
                 `
                 return

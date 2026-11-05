@@ -5,7 +5,7 @@ class CardDishClass {
      * Класс для создания карточки блюда с различными типами отображения
      * @param {Object} data - Данные блюда
      * @param {string} type - Тип контейнера ('dishes_container_const_amount', 'dishes_container_let_amount' или другой)
-     
+
      */
     constructor(data, type) {
         this.data = data;
@@ -30,8 +30,13 @@ class CardDishClass {
         const card = document.createElement('div');
         card.className = 'card_dish';
 
-        card.dataset.dishId = this.data.dish_id
-        
+        card.dataset.dishId = this.data.dish_id;
+        if (this.data.item_type) {
+            card.dataset.itemType = this.data.item_type;
+            card.dataset.itemId = this.data.item_type === 'set' ? this.data.meal_set_id : this.data.buffet_offering_id;
+            card.dataset.mealType = this.data.meal_type || '';
+        }
+
         if (this.type == 'dishes_container_const_amount') {
             card.innerHTML = this.createConstantAmountHTML()
         } else if (this.type == 'dishes_container_let_amount') {
@@ -39,7 +44,7 @@ class CardDishClass {
         }else if (this.type == 'dish_card_in_basket') {
             card.innerHTML = this.DishCardInBascet()
         }
-        
+
         return card;
     }
 
@@ -49,22 +54,41 @@ class CardDishClass {
      * @private
      */
 
+    displayName() {
+        const labels = {breakfast: 'Завтрак', lunch: 'Обед', afternoon_snack: 'Полдник', dinner: 'Ужин'};
+        return this.data.meal_type && labels[this.data.meal_type] || this.data.dish_name;
+    }
+
+    imageHTML() {
+        return this.data.img_url ? `<img src="https://voscollege.ru/img/${escapeData(this.data.img_url)}" alt="${escapeData(this.displayName())}">` : '';
+    }
+
+    detailsHTML() {
+        const d = this.data;
+        const components = (d.components || []).map(item => escapeData(item.dish_name)).join(', ');
+        const nutrition = [['Вес', d.serving_weight_g, 'г'], ['Энергия', d.energy_kcal, 'ккал'],
+            ['Белки', d.protein_g, 'г'], ['Жиры', d.fat_g, 'г'], ['Углеводы', d.carbohydrates_g, 'г']]
+            .filter(([, value]) => value != null).map(([label, value, unit]) => `${label}: ${escapeData(value)} ${unit}`).join('; ');
+        return `${components ? `<p class="card_dish_details">Состав: ${components}</p>` : ''}${nutrition ? `<p class="card_dish_details">${nutrition}</p>` : ''}`;
+    }
+
     createEditableAmountHTML() {
         return `
         <button class="add_basket">🛒</button>
         <div class="card_dish_image">
-            <img src="https://voscollege.ru/img/${escapeData(this.data.img_url)}" alt="${escapeData(this.data.dish_name)}">
+            ${this.imageHTML()}
         </div>
         <div class="card_dish_info">
-            <h2>${escapeData(this.data.dish_name)}</h2>
+            <h2>${escapeData(this.displayName())}</h2>
+            ${this.detailsHTML()}
             <div class="card_dish_info_text">
                 <p>Колич.:<br>${escapeData(this.data.quantity)} шт.</p>
                 <p>Цена:<br><span class="price_dish">${escapeData(Number(this.data.fixed_price))}</span> р.</p>
             </div>
             <div class="counter_dishes">
-                <button class="counter_minus">-</button>
+                ${this.data.item_type === 'set' ? '' : '<button class="counter_minus">-</button>'}
                 <p class="counter_value">1</p>
-                <button class="counter_plus">+</button>
+                ${this.data.item_type === 'set' ? '' : '<button class="counter_plus">+</button>'}
             </div>
         </div>
         `;
@@ -83,18 +107,19 @@ class CardDishClass {
         return `
         <button class="dell_basket">-</button>
         <div class="card_dish_image">
-            <img src="https://voscollege.ru/img/${escapeData(this.data.img_url)}" alt="${escapeData(this.data.dish_name)}">
+            ${this.imageHTML()}
         </div>
         <div class="card_dish_info">
-            <h2>${escapeData(this.data.dish_name)}</h2>
+            <h2>${escapeData(this.displayName())}</h2>
+            ${this.detailsHTML()}
             <div class="card_dish_info_text">
                 <p>Колич.:<br>${escapeData(this.data.quantity)} шт.</p>
                 <p>Цена:<br><span class="price_dish">${escapeData(Number(totalPrice))}</span> р.</p>
             </div>
             <div class="counter_dishes">
-                <button class="counter_minus">-</button>
+                ${this.data.item_type === 'set' ? '' : '<button class="counter_minus">-</button>'}
                 <p class="counter_value">${escapeData(initialQuantity)}</p>
-                <button class="counter_plus">+</button>
+                ${this.data.item_type === 'set' ? '' : '<button class="counter_plus">+</button>'}
             </div>
         </div>
         `;
@@ -111,16 +136,17 @@ class CardDishClass {
 
         return `
         <div class="card_dish_image">
-            <img src="https://voscollege.ru/img/${escapeData(this.data.img_url)}" alt="${escapeData(this.data.dish_name)}">
+            ${this.imageHTML()}
         </div>
         <div class="card_dish_info">
-            <h2>${escapeData(this.data.dish_name)}</h2>
+            <h2>${escapeData(this.displayName())}</h2>
+            ${this.detailsHTML()}
             <div class="card_dish_info_text">
                 <p>Ост. :<br>${escapeData(initialQuantity)} шт.</p>
                 <p>Цена:<br><span class="price_dish">${totalPrice}</span> р.</p>
             </div>
             <div class="counter_dishes constant_amount">
-                <p class="counter_value">${initialQuantity}</p>
+                <p class="counter_value">${escapeData(initialQuantity)}</p>
             </div>
         </div>
         `;
@@ -131,13 +157,14 @@ class CardDishClass {
      */
     updateTotalPrice() {
         if (!this.card) return;
-        
+
         const counterValue = this.card.querySelector('.counter_value');
         const priceElement = this.card.querySelector('.price_dish');
         if (counterValue && priceElement) {
             const price = this.data.fixed_price || this.data.price;
             priceElement.textContent = (price * parseInt(counterValue.textContent)).toFixed(2);
-            updateOrderTotalPrice();
+            const container = this.card.closest('#dishes_page_basket, #dishes_page_order');
+            if (container) updateOrderTotalPrice(container);
         }
     }
 
@@ -147,7 +174,7 @@ class CardDishClass {
      */
     addCounterListeners(card) {
         this.card = card;
-        
+
         const minusBtn = card.querySelector('.counter_minus');
         const plusBtn = card.querySelector('.counter_plus');
         const addButon = card.querySelector('.add_basket');
@@ -180,10 +207,10 @@ class CardDishClass {
 
 /**
  * Observer для анимированного появления карточек блюд при скролле
- * 
+ *
  * Наблюдает за появлением элементов в области видимости и добавляет анимацию
  * с задержкой для каждого элемента, создавая эффект последовательного появления.
- * 
+ *
  * @type {IntersectionObserver}
  */
 const observer_one = new IntersectionObserver((entries) => {
@@ -201,10 +228,10 @@ const observer_one = new IntersectionObserver((entries) => {
 
 /**
  * Обновляет контейнер с карточками блюд, отрисовывая новые данные и подключая анимацию
- * 
+ *
  * Функция полностью очищает контейнер и заполняет его новыми карточками блюд на основе переданных данных.
  * После отрисовки подключает IntersectionObserver для анимированного появления карточек при скролле.
- * 
+ *
  * @param {HTMLElement} dishesContainer - DOM-элемент контейнера для карточек блюд
  * @param {Object[]} data_dish - Массив данных для карточек блюд
  * @param {string} type - Тип карточки блюда ('dishes_container_const_amount' или 'dishes_container_let_amount')
@@ -212,10 +239,10 @@ const observer_one = new IntersectionObserver((entries) => {
  */
 /**
  * Обновляет контейнер с карточками блюд, отрисовывая новые данные и подключая анимацию
- * 
+ *
  * Функция полностью очищает контейнер и заполняет его новыми карточками блюд на основе переданных данных.
  * После отрисовки подключает IntersectionObserver для анимированного появления карточек при скролле.
- * 
+ *
  * @param {HTMLElement} dishesContainer - DOM-элемент контейнера для карточек блюд
  * @param {Object|Array} data_dish - Данные для карточек блюд (объект с массивами или простой массив)
  * @param {string} type - Тип карточки блюда ('dishes_container_const_amount' или 'dishes_container_let_amount')
@@ -223,7 +250,7 @@ const observer_one = new IntersectionObserver((entries) => {
  */
 /**
  * Обновляет контейнер с карточками блюд на основе данных со сервера
- * 
+ *
  * @param {HTMLElement} dishesContainer - DOM-элемент контейнера для карточек блюд
  * @param {Object} data_dish - Объект-словарь с массивами блюд (пример: {ORD-1000004: Array(3)})
  * @param {string} type - Тип карточки блюда ('dishes_container_const_amount', 'dishes_container_let_amount' или 'dish_card_in_basket')
@@ -243,7 +270,7 @@ export function updating_dish_card(dishesContainer, data_dish, type = 'dishes_co
         const cardDish = new CardDishClass(dishData, type);
         dishesContainer.appendChild(cardDish.init());
     });
-    
+
     // Подключаем анимацию для всех карточек
     // dishesContainer.querySelectorAll('.card_dish').forEach(card => {
     //     observer_one.observe(card);

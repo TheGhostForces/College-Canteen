@@ -69,8 +69,8 @@ class UsersRepository:
             user_orm.student = StudentsOrm(
                 full_name=student.full_name,
                 group_name=student.group_name,
-                date_start=student.date_start,
-                date_end=student.date_end,
+                study_start_year=student.study_start_year,
+                study_end_year=student.study_end_year,
             )
 
         self.session.add(user_orm)

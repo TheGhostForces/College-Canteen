@@ -365,6 +365,17 @@ h2 {
   align-items: center;
   flex-direction: row;
 }
+.card_dish .card_dish_info .card_dish_details {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 0 10px;
+  margin: 0;
+  color: white;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
 .card_dish .card_dish_info .counter_dishes {
   width: 40%;
   height: 20%;

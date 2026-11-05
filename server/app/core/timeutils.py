@@ -10,6 +10,13 @@ from zoneinfo import ZoneInfo
 from app.core.config import get_settings
 
 
+def as_local_aware(value: datetime, timezone: ZoneInfo) -> datetime:
+    """Convert an aware instant to the requested college time zone."""
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError("an aware datetime is required")
+    return value.astimezone(timezone)
+
+
 def now_local() -> datetime:
     return datetime.now(ZoneInfo(get_settings().timezone)).replace(tzinfo=None)
 

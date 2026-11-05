@@ -34,17 +34,35 @@ async def add_dish(
         raise BadRequestError("Quantity must be positive")
     if data.cart_quantity > get_settings().max_cart_items:
         raise BadRequestError("Too many dishes")
-    await _ensure_dish_available_to(user, data.dish_id, dishes)
-    await baskets.add_dish(student.id, data.dish_id, data.cart_quantity)
+    if data.item_type is not None:
+        await baskets.add_typed(student.id, data)
+    else:
+        await _ensure_dish_available_to(user, data.dish_id, dishes)
+        await baskets.add_dish(student.id, data.dish_id, data.cart_quantity)
     return OkResponse()
 
 
 @router.delete("/dish", response_model=OkResponse, summary="Убрать блюдо из корзины")
 async def remove_dish(
-    dish_id: int, user: StudentUser, student: CurrentStudent, baskets: BasketRepo, dishes: DishesRepo
+    user: StudentUser,
+    student: CurrentStudent,
+    baskets: BasketRepo,
+    dishes: DishesRepo,
+    dish_id: int | None = None,
+    item_type: str | None = None,
+    buffet_offering_id: int | None = None,
+    meal_set_id: int | None = None,
 ):
-    await _ensure_dish_available_to(user, dish_id, dishes)
-    await baskets.remove_dish(student.id, dish_id)
+    if item_type in ("buffet", "set"):
+        item_id = buffet_offering_id if item_type == "buffet" else meal_set_id
+        if item_id is None:
+            raise BadRequestError("Item identifier required")
+        await baskets.remove_typed(student.id, item_type, item_id)
+    elif dish_id is not None and item_type is None:
+        await _ensure_dish_available_to(user, dish_id, dishes)
+        await baskets.remove_dish(student.id, dish_id)
+    else:
+        raise BadRequestError("Item identifier required")
     return OkResponse()
 
 
@@ -54,6 +72,9 @@ async def change_quantity(
 ):
     if data.cart_quantity > get_settings().max_cart_items:
         raise BadRequestError("Too many dishes")
-    await _ensure_dish_available_to(user, data.dish_id, dishes)
-    await baskets.set_quantity(student.id, data.dish_id, data.cart_quantity)
+    if data.item_type is not None:
+        await baskets.add_typed(student.id, data, set_quantity=True)
+    else:
+        await _ensure_dish_available_to(user, data.dish_id, dishes)
+        await baskets.set_quantity(student.id, data.dish_id, data.cart_quantity)
     return OkResponse()
