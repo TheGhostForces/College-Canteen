@@ -2,6 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
+    <script>location.replace('./dishes.html?view=basket');</script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Корзина и заказ</title>
     <link rel="stylesheet" href="../styles/styles.css">
@@ -13,7 +14,7 @@
     <div id="div_logo">
         <img src="../png/logo_with_text.png" alt="">
     </div>
-    
+
     <header>
         <a href="./dishes.html"><img src="../png/eat.png" alt=""></a>
         <a href="./basket.html"><img id="basket_img" src="../png/korzina.png" alt=""></a>
@@ -34,7 +35,7 @@
     <div id="total_price_section" style="text-align: center; margin: 20px; display: none;">
         <strong>Общая стоимость заказа: <span id="total_order_price">0</span> руб.</strong>
     </div>
-    
+
     <div id="dishes_swipe_container">
         <div id="qrcode_container">
             <div id="qrcode_wrapper">
@@ -47,7 +48,7 @@
             <div id="dishes_page_order" class="dishes-page"></div>
         </div>
     </div>
-    
+
     <div id="order_container"></div>
 
     <div class="wrapper_for_btn">
@@ -129,7 +130,7 @@
     // Кнопки для взаимодействия с корзиной и заказом: удаление и добавление заказа
     const remove_order = document.getElementById('remove_order')
     const set_order = document.getElementById('set_order')
-    
+
     // Обработчик для клика на QR-код (увеличение при клике)
     if (qrcode) {
         qrcode.addEventListener('click', (e) => {
@@ -160,7 +161,7 @@
     let startY = 0;
     let currentPage = 0;
     const totalPages = 2;
-    
+
     const buttons = document.querySelectorAll('#menu_dishes button');
     const title_chapter = document.querySelector('h1');
 
@@ -231,7 +232,7 @@
         dishes_page_order.innerHTML = ''
         remove_order.style.display = 'none';
         dishes_page_basket.style.display = 'block';
- 
+
         try {
             const response = await fetch(`/api/basket/dish`, {
                 method: 'GET',
@@ -266,7 +267,7 @@
             const dishes = data.Orders
             updating_dish_card(dishes_page_order, dishes, 'dishes_container_const_amount')
             updateOrderTotalPrice(dishes_page_order);
-            
+
             await refreshPickupQRCode();
         } catch (error) {
             console.error(error);
@@ -382,7 +383,7 @@
         border-radius: 8px;
         box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     }
-    
+
     #qrcode {
         display: flex;
         justify-content: center;
@@ -392,7 +393,7 @@
         background: white;
         transition: transform 0.3s ease;
     }
-    
+
     #order #qrcode_container #qrcode canvas,
     #order #qrcode_container #qrcode img {
         width: 300px;
@@ -400,7 +401,7 @@
         height: auto;
         display: block;
     }
-    
+
     #client_id_display {
         font-size: 16px;
         font-weight: normal;
@@ -411,7 +412,7 @@
         font-family: monospace;
         box-shadow: 0 1px 3px rgba(0,0,0,0.1);
     }
-    
+
     #qrcode_container {
         display: flex;
         justify-content: center;
@@ -421,13 +422,13 @@
         border-radius: 8px;
         margin: 10px;
     }
-    
+
     /* Адаптация для мобильных устройств */
     @media (max-width: 768px) {
         #qrcode_container {
             min-height: 380px;
         }
-        
+
         #client_id_display {
             font-size: 14px;
             padding: 6px 12px;

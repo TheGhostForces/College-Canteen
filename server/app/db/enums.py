@@ -8,14 +8,6 @@ class OrderStatus(enum.Enum):
     EXPIRED = "expired"
 
 
-class DishCategory(enum.Enum):
-    FIRST = "Первое"
-    SECOND = "Второе"
-    DRINK = "Напитки"
-    DESSERT = "Десерт"
-    SNACKS = "Снеки"
-
-
 class UserRole(enum.Enum):
     STUDENT = "student"
     PROVIDER = "provider"

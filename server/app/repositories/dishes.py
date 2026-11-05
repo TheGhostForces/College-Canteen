@@ -6,7 +6,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.core.exceptions import BadRequestError, ConflictError, NotFoundError
-from app.db.models import DishesOrm, ScheduleDishesOrm
+from app.db.models import (
+    BuffetOfferingOrm,
+    DishesOrm,
+    EducationInstitutionOrm,
+    MealSetComponentOrm,
+    MealSetOrm,
+    ScheduleDishesOrm,
+)
 from app.schemas.dishes import DishCreateList, DishPlan, DishUpdate
 
 
@@ -15,6 +22,52 @@ class DishesRepository:
 
     def __init__(self, session: AsyncSession):
         self.session = session
+
+    async def buffet(self, institution_id: int, visible_only: bool = False) -> list[BuffetOfferingOrm]:
+        query = (
+            select(BuffetOfferingOrm)
+            .join(BuffetOfferingOrm.dish)
+            .where(DishesOrm.institution_id == institution_id)
+            .order_by(BuffetOfferingOrm.id)
+        )
+        if visible_only:
+            query = query.where(
+                BuffetOfferingOrm.is_visible.is_(True), BuffetOfferingOrm.quantity > 0, DishesOrm.is_active.is_(True)
+            )
+        return list((await self.session.execute(query)).scalars())
+
+    async def create_buffet(self, institution_id: int, dish_id: int, quantity: int) -> BuffetOfferingOrm:
+        dish = await self.get_by_id(dish_id)
+        if dish is None or dish.institution_id != institution_id or not dish.is_active:
+            raise NotFoundError("Dish not found")
+        offering = BuffetOfferingOrm(dish_id=dish_id, quantity=quantity, dish=dish)
+        self.session.add(offering)
+        try:
+            await self.session.commit()
+        except IntegrityError:
+            await self.session.rollback()
+            raise ConflictError("Offering already exists") from None
+        return offering
+
+    async def update_buffet(self, institution_id: int, offering_id: int, delta: int | None, visible: bool | None):
+        query = (
+            select(BuffetOfferingOrm)
+            .join(BuffetOfferingOrm.dish)
+            .where(BuffetOfferingOrm.id == offering_id, DishesOrm.institution_id == institution_id)
+            .with_for_update(of=BuffetOfferingOrm)
+            .execution_options(populate_existing=True)
+        )
+        offering = (await self.session.execute(query)).scalar_one_or_none()
+        if offering is None:
+            raise NotFoundError("Offering not found")
+        if delta is not None:
+            if offering.quantity + delta < 0:
+                raise BadRequestError("Stock cannot be negative")
+            offering.quantity += delta
+        if visible is not None:
+            offering.is_visible = visible
+        await self.session.commit()
+        return offering
 
     # ---- справочник блюд ----
     async def get_by_id(self, dish_id: int) -> DishesOrm | None:
@@ -57,8 +110,13 @@ class DishesRepository:
                 to_insert.append(
                     DishesOrm(
                         dish_name=name,
-                        category=item.category.value,
+                        category=item.category,
                         fixed_price=item.fixed_price,
+                        serving_weight_g=item.serving_weight_g,
+                        energy_kcal=item.energy_kcal,
+                        protein_g=item.protein_g,
+                        fat_g=item.fat_g,
+                        carbohydrates_g=item.carbohydrates_g,
                         img_url=item.img_url,
                         institution_id=institution_id,
                     )
@@ -66,8 +124,10 @@ class DishesRepository:
             elif not old.is_active:
                 # "удалённое" блюдо с тем же именем возвращаем в меню, а не блокируем создание
                 old.is_active = True
-                old.category = item.category.value
+                old.category = item.category
                 old.fixed_price = item.fixed_price
+                for field in ("serving_weight_g", "energy_kcal", "protein_g", "fat_g", "carbohydrates_g"):
+                    setattr(old, field, getattr(item, field))
                 if item.img_url is not None:
                     old.img_url = item.img_url
                 reactivated.append(old)
@@ -97,8 +157,6 @@ class DishesRepository:
         values = data.model_dump(exclude_none=True)
         if not values:
             raise BadRequestError("Nothing to update")
-        if "category" in values:
-            values["category"] = values["category"].value
         try:
             await self.session.execute(update(DishesOrm).where(DishesOrm.id == dish_id).values(**values))
             await self.session.commit()
@@ -136,6 +194,100 @@ class DishesRepository:
         await self.session.commit()
         return result.rowcount, not_found_ids, not_found_names
 
+    async def anchor(self, institution_id):
+        institution = await self.session.get(EducationInstitutionOrm, institution_id)
+        return institution.cycle_start_monday
+
+    async def set_anchor(self, institution_id, anchor):
+        institution = await self.session.get(EducationInstitutionOrm, institution_id)
+        institution.cycle_start_monday = anchor
+        await self.session.commit()
+
+    async def meal_sets(self, institution_id, slot=None):
+        query = select(MealSetOrm).where(MealSetOrm.institution_id == institution_id).order_by(MealSetOrm.id)
+        if slot is not None:
+            query = query.where(MealSetOrm.cycle_week == slot[0], MealSetOrm.weekday == slot[1])
+        rows = (await self.session.execute(query)).scalars().all()
+        result = []
+        for meal in rows:
+            components = [component.dish for component in meal.components]
+            if slot is not None and any(not dish.is_active for dish in components):
+                continue
+            fields = ("serving_weight_g", "energy_kcal", "protein_g", "fat_g", "carbohydrates_g")
+            result.append(
+                dict(
+                    id=meal.id,
+                    cycle_week=meal.cycle_week,
+                    weekday=meal.weekday,
+                    meal_type=meal.meal_type,
+                    price=meal.price,
+                    dish_ids=[d.id for d in components],
+                    components=components,
+                    **{field: sum(getattr(d, field) for d in components) for field in fields},
+                )
+            )
+        return result
+
+    async def save_meal_set(self, institution_id, data, meal_id=None):
+        valid = (
+            (
+                await self.session.execute(
+                    select(DishesOrm.id).where(
+                        DishesOrm.institution_id == institution_id,
+                        DishesOrm.is_active.is_(True),
+                        DishesOrm.id.in_(data.dish_ids),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if set(valid) != set(data.dish_ids):
+            raise BadRequestError("Unknown, inactive or foreign components")
+        if meal_id is None:
+            meal = MealSetOrm(institution_id=institution_id)
+            self.session.add(meal)
+        else:
+            meal = (
+                await self.session.execute(
+                    select(MealSetOrm)
+                    .where(MealSetOrm.id == meal_id, MealSetOrm.institution_id == institution_id)
+                    .with_for_update(of=MealSetOrm)
+                )
+            ).scalar_one_or_none()
+            if meal is None:
+                raise NotFoundError("Meal set not found")
+        meal.cycle_week, meal.weekday, meal.meal_type, meal.price = (
+            data.cycle_week,
+            data.weekday,
+            data.meal_type,
+            data.price,
+        )
+        try:
+            if meal_id is not None:
+                meal.components.clear()
+                await self.session.flush()
+            meal.components = [
+                MealSetComponentOrm(dish_id=dish_id, position=i) for i, dish_id in enumerate(data.dish_ids)
+            ]
+            await self.session.commit()
+        except IntegrityError:
+            await self.session.rollback()
+            raise ConflictError("Meal set slot already exists") from None
+
+    async def delete_meal_set(self, institution_id, meal_id):
+        meal = (
+            await self.session.execute(
+                select(MealSetOrm)
+                .where(MealSetOrm.id == meal_id, MealSetOrm.institution_id == institution_id)
+                .with_for_update(of=MealSetOrm)
+            )
+        ).scalar_one_or_none()
+        if meal is None:
+            raise NotFoundError("Meal set not found")
+        await self.session.delete(meal)
+        await self.session.commit()
+
     # ---- расписание ----
     async def get_menu_for_day(self, institution_id: int, day: date) -> list[dict]:
         """Все активные блюда с остатком на день (0, если блюдо не запланировано) - для студента."""
@@ -156,6 +308,10 @@ class DishesRepository:
                 "category": dish.category,
                 "quantity": schedule.quantity if schedule else 0,
                 "fixed_price": dish.fixed_price,
+                **{
+                    field: getattr(dish, field)
+                    for field in ("serving_weight_g", "energy_kcal", "protein_g", "fat_g", "carbohydrates_g")
+                },
                 "img_url": dish.img_url,
             }
             for dish, schedule in (await self.session.execute(query)).all()
@@ -181,6 +337,10 @@ class DishesRepository:
                 "category": item.dish.category,
                 "quantity": item.total_quantity,
                 "fixed_price": item.dish.fixed_price,
+                **{
+                    field: getattr(item.dish, field)
+                    for field in ("serving_weight_g", "energy_kcal", "protein_g", "fat_g", "carbohydrates_g")
+                },
                 "img_url": item.dish.img_url,
             }
             for item in items
@@ -208,6 +368,10 @@ class DishesRepository:
                 "quantity": schedule.quantity if schedule else 0,
                 "total_quantity": schedule.total_quantity if schedule else 0,
                 "fixed_price": dish.fixed_price,
+                **{
+                    field: getattr(dish, field)
+                    for field in ("serving_weight_g", "energy_kcal", "protein_g", "fat_g", "carbohydrates_g")
+                },
                 "img_url": dish.img_url,
             }
             for dish, schedule in rows

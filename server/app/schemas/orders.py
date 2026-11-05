@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.db.enums import OrderStatus
 from app.schemas.common import OkResponse
-from app.schemas.dishes import DishOut
+from app.schemas.dishes import DishBasicOut
 
 
 class OrderCreated(BaseModel):
@@ -16,12 +16,23 @@ class OrderCreatedResponse(OkResponse):
     Order: OrderCreated
 
 
-class OrderItemOut(DishOut):
+class OrderItemOut(DishBasicOut):
     order_id: int
     total_price: int
     created_at: datetime
-    dish_id: int
+    dish_id: int | None = None
     quantity: int
+    item_type: str | None = None
+    buffet_offering_id: int | None = None
+    meal_set_id: int | None = None
+    meal_type: str | None = None
+    pickup_date: date | None = None
+    components: list[dict] = []
+    serving_weight_g: float | None = None
+    energy_kcal: float | None = None
+    protein_g: float | None = None
+    fat_g: float | None = None
+    carbohydrates_g: float | None = None
 
 
 class OrdersResponse(OkResponse):
@@ -51,8 +62,38 @@ class OrderedDishesResponse(OkResponse):
     dishes: list[OrderedDishOut]
 
 
+class SupplierSetReportItem(BaseModel):
+    meal_set_id: int
+    meal_type: str
+    quantity: int
+    components: list[dict] = Field(default_factory=list)
+
+
+class SupplierBuffetReportItem(BaseModel):
+    buffet_offering_id: int
+    dish_name: str
+    quantity: int
+
+
+class SupplierReportResponse(BaseModel):
+    sets: list[SupplierSetReportItem]
+    buffet: list[SupplierBuffetReportItem]
+
+
 class HistoryDishOut(BaseModel):
-    dish_id: int
+    dish_id: int | None = None
+    item_type: str | None = None
+    buffet_offering_id: int | None = None
+    meal_set_id: int | None = None
+    meal_type: str | None = None
+    components: list[dict] = []
+    category: str | None = None
+    img_url: str | None = None
+    serving_weight_g: float | None = None
+    energy_kcal: float | None = None
+    protein_g: float | None = None
+    fat_g: float | None = None
+    carbohydrates_g: float | None = None
     quantity: int
     dish_name: str
     fixed_price: int

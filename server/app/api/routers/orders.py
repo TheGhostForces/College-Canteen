@@ -1,11 +1,12 @@
-from datetime import date
+from datetime import UTC, date, datetime
+from zoneinfo import ZoneInfo
 
 import jwt
 from fastapi import APIRouter, Response
 
-from app.api.deps import CurrentStudent, Operator, OrdersRepo, Provider, UsersRepo
+from app.api.deps import CurrentStudent, CurrentUser, Operator, OrdersRepo, Provider, UsersRepo
 from app.core.config import get_settings
-from app.core.exceptions import BadRequestError, NotFoundError
+from app.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
 from app.core.security import create_pickup_token, decode_pickup_token
 from app.core.timeutils import now_local, today_local, tomorrow_local
 from app.db.models import StudentsOrm, UsersOrm
@@ -18,9 +19,27 @@ from app.schemas.orders import (
     PickupTokenRequest,
     PickupTokenResponse,
     StudentOrdersResponse,
+    SupplierReportResponse,
 )
+from app.services.menu_calendar import next_pickup_day
 
 router = APIRouter(prefix="/orders", tags=["Заказы"])
+
+
+def pickup_now():
+    return datetime.now(UTC)
+
+
+@router.get("/next-pickup-date")
+async def pickup_date(user: CurrentUser):
+    if user.role not in ("provider", "operator"):
+        raise ForbiddenError("Insufficient permissions")
+    return {"pickup_date": next_pickup_day(pickup_now(), ZoneInfo(get_settings().timezone))}
+
+
+def ensure_provider_institution(provider: UsersOrm, institution_id: int) -> None:
+    if provider.institution_id != institution_id:
+        raise ForbiddenError("Insufficient permissions")
 
 
 async def _get_student_of_operator(token: str, operator: UsersOrm, users: UsersRepo) -> StudentsOrm:
@@ -46,14 +65,12 @@ async def _get_student_of_operator(token: str, operator: UsersOrm, users: UsersR
 # ---- студент ----
 @router.post("/order", response_model=OrderCreatedResponse, summary="Оформить заказ из корзины (студент)")
 async def create_order(student: CurrentStudent, orders: OrdersRepo):
-    return OrderCreatedResponse(Order=OrderCreated(**await orders.create_from_basket(student.id)))
+    return OrderCreatedResponse(Order=OrderCreated(**await orders.create_from_basket(student.id, allow_legacy=False)))
 
 
 @router.delete("/order", response_model=OkResponse, summary="Отменить сегодняшний заказ (студент)")
 async def cancel_order(student: CurrentStudent, orders: OrdersRepo):
-    if now_local().hour >= get_settings().order_cancel_deadline_hour:
-        raise BadRequestError("Not enough time")
-    await orders.cancel_todays_order(student.id)
+    await orders.cancel_todays_order(student.id, legacy_now=now_local())
     return OkResponse()
 
 
@@ -87,14 +104,16 @@ async def get_student_orders_for_pickup(
     return StudentOrdersResponse(
         Name=student.full_name,
         Student_ID=student.id,
-        Orders=await orders.get_student_orders(student.id, pickup_date=today_local()),
+        Orders=await orders.get_student_orders(
+            student.id, pickup_date=today_local(), institution_id=operator.institution_id
+        ),
     )
 
 
 @router.patch("/order", response_model=OkResponse, summary="Отметить заказ студента выданным (оператор)")
 async def complete_order(body: PickupTokenRequest, operator: Operator, users: UsersRepo, orders: OrdersRepo):
     student = await _get_student_of_operator(body.pickup_token, operator, users)
-    if not await orders.complete_todays_orders(student.id):
+    if not await orders.complete_todays_orders(student.id, operator.institution_id):
         raise NotFoundError("No order in progress for this student")
     return OkResponse()
 
@@ -105,11 +124,21 @@ async def get_orders_for_pickup_date(target_date: date, operator: Operator, orde
 
 
 # ---- поставщик ----
+@router.get("/supplier-report", response_model=SupplierReportResponse, summary="Сводка заказов (поставщик)")
+async def supplier_report(institution_id: int, target_date: date, provider: Provider, orders: OrdersRepo):
+    ensure_provider_institution(provider, institution_id)
+    return SupplierReportResponse(**await orders.get_supplier_report(institution_id, target_date))
+
+
 @router.get("/total_quantity", response_model=OrderedDishesResponse, summary="Заказано на завтра (поставщик)")
 async def get_ordered_totals(institution_id: int, provider: Provider, orders: OrdersRepo):
+    ensure_provider_institution(provider, institution_id)
     return OrderedDishesResponse(dishes=await orders.get_ordered_totals(institution_id, tomorrow_local()))
 
 
 @router.get("/orders", response_model=OrdersResponse, summary="Все активные заказы заведения (поставщик)")
-async def get_institution_orders(institution_id: int, provider: Provider, orders: OrdersRepo):
-    return OrdersResponse(Orders=await orders.get_institution_orders(institution_id))
+async def get_institution_orders(
+    institution_id: int, provider: Provider, orders: OrdersRepo, target_date: date | None = None
+):
+    ensure_provider_institution(provider, institution_id)
+    return OrdersResponse(Orders=await orders.get_institution_orders(institution_id, target_date))

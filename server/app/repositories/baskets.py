@@ -1,3 +1,6 @@
+from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
+
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -6,13 +9,46 @@ from app.core.config import get_settings
 from app.core.exceptions import BadRequestError, NotFoundError
 from app.core.timeutils import now_local, today_local, tomorrow_local
 from app.db.models import (
+    BuffetOfferingOrm,
     DishesOrm,
+    EducationInstitutionOrm,
+    MealSetOrm,
     ScheduleDishesOrm,
     ShoppingCartDishesOrm,
     ShoppingCartOrm,
     StudentsOrm,
+    TypedCartItemOrm,
     UsersOrm,
 )
+from app.services.menu_calendar import cycle_slot, next_pickup_day
+
+
+def menu_now():
+    return datetime.now(UTC)
+
+
+def pickup_day():
+    return next_pickup_day(menu_now(), ZoneInfo(get_settings().timezone))
+
+
+def dish_snapshot(dish):
+    return {
+        key: getattr(dish, key)
+        for key in (
+            "dish_name",
+            "category",
+            "img_url",
+            "serving_weight_g",
+            "energy_kcal",
+            "protein_g",
+            "fat_g",
+            "carbohydrates_g",
+        )
+    } | {"dish_id": dish.id}
+
+
+def set_material(details):
+    return {"meal_type": details["meal_type"], "components": details["components"]}
 
 
 class BasketRepository:
@@ -44,7 +80,7 @@ class BasketRepository:
             .where(ShoppingCartDishesOrm.shoppingcart_id == basket_id)
         )
         items = (await self.session.execute(query)).scalars().all()
-        return [
+        legacy = [
             {
                 "id": item.id,
                 "dish_id": item.schedule_dish.dish_id,
@@ -61,6 +97,150 @@ class BasketRepository:
             }
             for item in items
         ]
+        typed = (
+            (await self.session.execute(select(TypedCartItemOrm).where(TypedCartItemOrm.cart_id == basket_id)))
+            .scalars()
+            .all()
+        )
+        for item in typed:
+            details = await self.typed_details(item)
+            if details:
+                legacy.append(
+                    {
+                        **details,
+                        "id": item.id,
+                        "quantity": item.quantity,
+                        "total_price": item.quantity * details["fixed_price"],
+                        "date": item.pickup_date,
+                    }
+                )
+        return legacy
+
+    async def typed_details(self, item, lock=False):
+        if item.buffet_offering_id is not None:
+            query = select(BuffetOfferingOrm).where(BuffetOfferingOrm.id == item.buffet_offering_id)
+            if lock:
+                query = query.with_for_update(of=BuffetOfferingOrm).execution_options(populate_existing=True)
+            offering = (await self.session.execute(query)).scalar_one_or_none()
+            if offering is None:
+                return None
+            dish = offering.dish
+            return {
+                **dish_snapshot(dish),
+                "item_type": "buffet",
+                "buffet_offering_id": offering.id,
+                "institution_id": dish.institution_id,
+                "fixed_price": dish.fixed_price,
+                "schedule_quantity": offering.quantity,
+                "available": offering.is_visible and dish.is_active,
+            }
+        if lock:
+            meal = (
+                await self.session.execute(
+                    select(MealSetOrm)
+                    .where(MealSetOrm.id == item.meal_set_id)
+                    .with_for_update(of=MealSetOrm)
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one_or_none()
+        else:
+            meal = await self.session.get(MealSetOrm, item.meal_set_id, populate_existing=True)
+        if meal is None:
+            return None
+        components = [dish_snapshot(c.dish) for c in meal.components]
+        institution = await self.session.get(EducationInstitutionOrm, meal.institution_id)
+        try:
+            slot = cycle_slot(institution.cycle_start_monday, pickup_day())
+        except ValueError:
+            slot = None
+        return {
+            "item_type": "set",
+            "meal_set_id": meal.id,
+            "meal_type": meal.meal_type,
+            "institution_id": meal.institution_id,
+            "dish_name": meal.meal_type,
+            "category": "set",
+            "img_url": None,
+            "fixed_price": meal.price,
+            "components": components,
+            **{
+                key: sum(c[key] for c in components)
+                for key in ("serving_weight_g", "energy_kcal", "protein_g", "fat_g", "carbohydrates_g")
+            },
+            "available": slot == (meal.cycle_week, meal.weekday) and all(c.dish.is_active for c in meal.components),
+        }
+
+    async def add_typed(self, student_id, data, set_quantity=False):
+        institution_id = await self.lock_student(student_id)
+        basket = await self.get_by_student(student_id) or await self._create_basket(student_id)
+        key = TypedCartItemOrm.buffet_offering_id if data.item_type == "buffet" else TypedCartItemOrm.meal_set_id
+        item_id = data.buffet_offering_id if data.item_type == "buffet" else data.meal_set_id
+        item = (
+            await self.session.execute(
+                select(TypedCartItemOrm).where(TypedCartItemOrm.cart_id == basket.id, key == item_id)
+            )
+        ).scalar_one_or_none()
+        if set_quantity and data.cart_quantity == 0:
+            if item is None:
+                raise NotFoundError("Item not found")
+            await self.session.delete(item)
+            await self.session.commit()
+            return
+        candidate = item or TypedCartItemOrm(
+            cart_id=basket.id,
+            buffet_offering_id=data.buffet_offering_id,
+            meal_set_id=data.meal_set_id,
+            quantity=data.cart_quantity,
+            pickup_date=pickup_day(),
+            unit_price=1,
+        )
+        details = await self.typed_details(candidate)
+        if not details or details["institution_id"] != institution_id or not details["available"]:
+            raise NotFoundError("Item not found")
+        quantity = data.cart_quantity if set_quantity else data.cart_quantity + (item.quantity if item else 0)
+        if quantity < 1:
+            raise BadRequestError("Quantity must be positive")
+        if data.item_type == "set" and quantity != 1:
+            raise BadRequestError("Only one of each set type is allowed")
+        if data.item_type == "buffet" and quantity > details["schedule_quantity"]:
+            raise BadRequestError("Insufficient stock")
+        existing = await self.get_items(basket.id)
+        others = [
+            x
+            for x in existing
+            if not (
+                x.get("item_type") == data.item_type
+                and x.get("buffet_offering_id" if data.item_type == "buffet" else "meal_set_id") == item_id
+            )
+        ]
+        if data.item_type == "set" and any(x.get("meal_type") == details["meal_type"] for x in others):
+            raise BadRequestError("Only one of each set type is allowed")
+        self.check_limits(
+            sum(x["quantity"] for x in others),
+            sum(x["total_price"] for x in others),
+            quantity,
+            quantity * details["fixed_price"],
+        )
+        candidate.quantity, candidate.unit_price, candidate.pickup_date = quantity, details["fixed_price"], pickup_day()
+        if data.item_type == "set":
+            candidate.material_snapshot = set_material(details)
+        if item is None:
+            self.session.add(candidate)
+        basket.updated_at = now_local()
+        await self.session.commit()
+
+    async def remove_typed(self, student_id, item_type, item_id):
+        await self.lock_student(student_id)
+        basket = await self.get_by_student(student_id)
+        if basket is None:
+            raise NotFoundError("Basket not found")
+        key = TypedCartItemOrm.buffet_offering_id if item_type == "buffet" else TypedCartItemOrm.meal_set_id
+        result = await self.session.execute(
+            delete(TypedCartItemOrm).where(TypedCartItemOrm.cart_id == basket.id, key == item_id)
+        )
+        if not result.rowcount:
+            raise NotFoundError("Item not found")
+        await self.session.commit()
 
     # ---- изменение ----
     async def add_dish(self, student_id: int, dish_id: int, quantity: int) -> None:

@@ -9,7 +9,7 @@ from app.services import mailer
 
 
 def settings(**kwargs):
-    return Settings(postgres_password="test", secret_key="x" * 32, _env_file=None, **kwargs)
+    return Settings(postgres_password="test", canteen_test_pgpass=False, secret_key="x" * 32, _env_file=None, **kwargs)
 
 
 def test_console_backend_logs_code_without_sending(monkeypatch, caplog):

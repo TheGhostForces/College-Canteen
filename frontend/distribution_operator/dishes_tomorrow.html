@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, shrink-to-fit=no">
-    
+
     <title>Выдача заказов</title>
-    
+
     <link rel="stylesheet" href="../styles/styles.css">
     <link rel="stylesheet" href="../styles/normal.css">
 
@@ -27,6 +27,17 @@
         padding-top: 2px;
         padding-bottom: 2px;
     }
+
+    #buffet_container .mini_card {
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 4px;
+        padding: 6px;
+        box-sizing: border-box;
+    }
+    #buffet_container .mini_card p { width: 100%; border: 0; }
+    #buffet_container .mini_card input { width: 80px; }
+    #buffet_container .mini_card button { flex: 1 1 auto; }
 
     .print_actions {
         display: flex;
@@ -70,7 +81,8 @@
         .description_form,
         .print_actions,
         #menu,
-        .error_message {
+        .error_message,
+        #buffet_controls {
             display: none !important;
         }
 
@@ -210,11 +222,11 @@
 </head>
 <body id="dishes_tomorrow">
     <input type="checkbox" id="menuToggle" class="checkbox">
-    
+
     <div id="div_logo">
         <img src="../png/logo_with_text.png" alt="">
     </div>
-    
+
     <header>
         <a href="./order_search.html"><img src="../png/order_search.png" alt=""></a>
         <a href="./dishes_tomorrow.html"><img id="dishes_tomorrow_img" src="../png/dishes_tomorrow.png" alt=""></a>
@@ -223,12 +235,21 @@
         </label>
     </header>
 
-    <h1>Просмотр позиций на завтра</h1>
+    <h1>Просмотр позиций на следующий день выдачи</h1>
 
     <p class="description_form">
-        В форме отображаются подтверждённые заказы студентов на завтрашний день.
+        В форме отображаются подтверждённые заказы студентов на следующий день выдачи.
         Актуальность данных гарантируется после 16:00 по московскому времени.
     </p>
+
+    <section id="buffet_controls">
+        <h2>Остатки буфета</h2>
+        <p class="description_form">Изменяйте доступное количество и видимость товаров.</p>
+        <div class="mini_card"><p>Блюдо</p><select id="buffet_dish"></select></div>
+        <div class="mini_card"><p>Количество</p><input id="buffet_initial_quantity" type="number" min="0" step="1" value="0"></div>
+        <div class="wrapper_for_btn"><button class="basic_button" id="buffet_create" type="button">Добавить товар</button></div>
+        <div id="buffet_container" aria-live="polite"></div>
+    </section>
 
     <div class="print_actions">
         <button class="basic_button" id="print_summary_btn" type="button">Печать сводки</button>
@@ -267,11 +288,62 @@
     const print_summary_btn = document.getElementById('print_summary_btn');
     const print_orders_btn = document.getElementById('print_orders_btn');
 
-    function getTomorrowDate() {
-        const tomorrow = new Date();
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        return tomorrow.toISOString().split('T')[0];
+    const buffetContainer = document.getElementById('buffet_container');
+    const buffetDish = document.getElementById('buffet_dish');
+
+    async function buffetRequest(url, options = {}) {
+        const response = await fetch(url, { credentials: 'include', ...options });
+        if (!response.ok) {
+            const body = await response.json().catch(() => ({}));
+            throw new Error(typeof body.detail === 'string' ? body.detail : `Ошибка сервера: ${response.status}`);
+        }
+        return response.json();
     }
+
+    async function loadBuffet() {
+        const [stock, catalog] = await Promise.all([
+            buffetRequest('/api/dishes/buffet'), buffetRequest('/api/dishes/buffet/catalog')
+        ]);
+        const existing = new Set(stock.offerings.map(item => item.dish_id));
+        buffetDish.replaceChildren(new Option('Выберите блюдо', ''));
+        catalog.dishes.filter(dish => !existing.has(dish.id)).forEach(dish => buffetDish.add(new Option(dish.dish_name, dish.id)));
+        buffetContainer.innerHTML = stock.offerings.map(item => `
+            <div class="mini_card" data-offering="${item.id}">
+                <p>${escapeData(item.dish_name)} — доступно: ${item.quantity}, ${item.is_visible ? 'виден' : 'скрыт'}</p>
+                <input type="number" min="1" step="1" value="1" aria-label="Изменение количества">
+                <button type="button" class="basic_button" data-action="add">Добавить</button>
+                <button type="button" class="basic_button" data-action="reduce">Уменьшить</button>
+                <button type="button" class="basic_button" data-action="visibility" data-visible="${item.is_visible}">${item.is_visible ? 'Скрыть' : 'Показать'}</button>
+            </div>`).join('') || '<p>Буфетных товаров пока нет</p>';
+    }
+
+    document.getElementById('buffet_create').addEventListener('click', async () => {
+        try {
+            const quantityInput = document.getElementById('buffet_initial_quantity');
+            const quantity = Number(quantityInput.value);
+            if (!buffetDish.value || quantityInput.value === '' || !Number.isInteger(quantity) || quantity < 0) throw new Error('Выберите блюдо и укажите количество');
+            await buffetRequest('/api/dishes/buffet', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dish_id: Number(buffetDish.value), quantity }) });
+            await loadBuffet();
+        } catch (error) { show_message(error.message, false); }
+    });
+
+    buffetContainer.addEventListener('click', async event => {
+        const button = event.target.closest('button[data-action]');
+        if (!button) return;
+        try {
+            const row = button.closest('[data-offering]');
+            let body;
+            if (button.dataset.action === 'visibility') body = { is_visible: button.dataset.visible !== 'true' };
+            else {
+                const input = row.querySelector('input');
+                const amount = Number(input.value);
+                if (input.value === '' || !Number.isInteger(amount) || amount <= 0) throw new Error('Укажите положительное количество');
+                body = { delta: button.dataset.action === 'add' ? amount : -amount };
+            }
+            await buffetRequest(`/api/dishes/buffet/${row.dataset.offering}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+            await loadBuffet();
+        } catch (error) { show_message(error.message, false); }
+    });
 
     function buildDishSummary(data) {
         const summary = {};
@@ -319,9 +391,13 @@
 
     async function loadTomorrowOrders() {
         try {
-            const tomorrowDate = getTomorrowDate();
-
-            const response = await fetch(`/api/orders/orders_date?target_date=${tomorrowDate}`, {
+            const dateResponse = await fetch('/api/orders/next-pickup-date', { credentials: 'include', cache: 'no-store' });
+            if (!dateResponse.ok) throw new Error('Не удалось получить дату выдачи');
+            const {pickup_date} = await dateResponse.json();
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(pickup_date)) throw new Error('Некорректная дата выдачи');
+            summary_title.textContent = `Сводка по блюдам — ${pickup_date}`;
+            orders_title.textContent = `Заказы по ученикам — ${pickup_date}`;
+            const response = await fetch(`/api/orders/orders_date?${new URLSearchParams({target_date: pickup_date})}`, {
                 method: 'GET',
                 credentials: 'include'
             });
@@ -340,7 +416,7 @@
                 summary_container.innerHTML = '';
                 container_with_data_from_api.innerHTML = `
                     <p style="text-align: center; padding: 20px;">
-                        Нет заказов на завтрашний день
+                        Нет заказов на следующий день выдачи
                     </p>
                 `;
                 return;
@@ -399,6 +475,7 @@
     document.addEventListener('DOMContentLoaded', async () => {
         await authRequiredAsync('operator')(async () => {})();
         await loadTomorrowOrders();
+        try { await loadBuffet(); } catch (error) { show_message(error.message, false); }
         creating_application_elements();
     });
 </script>

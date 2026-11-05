@@ -1,13 +1,17 @@
-from datetime import date, timedelta
+from datetime import UTC, date, datetime
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Query
 
 from app.api.deps import Admin, DishesRepo, Operator, Provider, StudentUser
+from app.core.config import get_settings
 from app.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
-from app.core.timeutils import today_local, tomorrow_local
 from app.schemas.common import OkResponse
 from app.schemas.dishes import (
+    BuffetCreate,
+    BuffetUpdate,
     CreateDishesResponse,
+    CycleAnchor,
     DeleteDishesResponse,
     DishCreateList,
     DishListResponse,
@@ -17,12 +21,12 @@ from app.schemas.dishes import (
     DishTomorrowResponse,
     DishUpdate,
     DishWithQuantityListResponse,
+    MealSetInput,
+    MealSetListResponse,
 )
+from app.services.menu_calendar import cycle_slot, next_pickup_day
 
 router = APIRouter(prefix="/dishes", tags=["Блюда"])
-
-MAX_PLANNING_DAYS = 7
-
 
 # ---- администратор: справочник блюд своего заведения ----
 @router.get("/dish", response_model=DishResponse, summary="Блюдо по названию (админ)")
@@ -94,10 +98,99 @@ async def delete_dishes(
     )
 
 
+@router.put("/cycle-anchor", response_model=OkResponse)
+async def save_anchor(data: CycleAnchor, admin: Admin, dishes: DishesRepo):
+    await dishes.set_anchor(admin.institution_id, data.cycle_start_monday)
+    return OkResponse()
+
+
+@router.get("/meal-sets", response_model=MealSetListResponse)
+async def list_meal_sets(admin: Admin, dishes: DishesRepo):
+    return MealSetListResponse(
+        cycle_start_monday=await dishes.anchor(admin.institution_id), sets=await dishes.meal_sets(admin.institution_id)
+    )
+
+
+@router.post("/meal-sets", response_model=OkResponse)
+async def create_meal_set(data: MealSetInput, admin: Admin, dishes: DishesRepo):
+    await dishes.save_meal_set(admin.institution_id, data)
+    return OkResponse()
+
+
+@router.put("/meal-sets/{meal_id}", response_model=OkResponse)
+async def update_meal_set(meal_id: int, data: MealSetInput, admin: Admin, dishes: DishesRepo):
+    await dishes.save_meal_set(admin.institution_id, data, meal_id)
+    return OkResponse()
+
+
+@router.delete("/meal-sets/{meal_id}", response_model=OkResponse)
+async def delete_meal_set(meal_id: int, admin: Admin, dishes: DishesRepo):
+    await dishes.delete_meal_set(admin.institution_id, meal_id)
+    return OkResponse()
+
+
+def buffet_data(offering):
+    dish = offering.dish
+    return {
+        "id": offering.id,
+        "dish_id": dish.id,
+        "institution_id": dish.institution_id,
+        "quantity": offering.quantity,
+        "is_visible": offering.is_visible,
+        "dish_name": dish.dish_name,
+        "category": dish.category,
+        "fixed_price": dish.fixed_price,
+        "img_url": dish.img_url,
+        "serving_weight_g": dish.serving_weight_g,
+        "energy_kcal": dish.energy_kcal,
+        "protein_g": dish.protein_g,
+        "fat_g": dish.fat_g,
+        "carbohydrates_g": dish.carbohydrates_g,
+    }
+
+
+@router.get("/buffet")
+async def list_buffet(operator: Operator, dishes: DishesRepo):
+    return {"offerings": [buffet_data(o) for o in await dishes.buffet(operator.institution_id)]}
+
+
+@router.get("/buffet/catalog")
+async def buffet_catalog(operator: Operator, dishes: DishesRepo):
+    active = await dishes.get_active(operator.institution_id)
+    return {"dishes": [{"id": dish.id, "dish_name": dish.dish_name} for dish in active]}
+
+
+@router.post("/buffet")
+async def create_buffet(data: BuffetCreate, operator: Operator, dishes: DishesRepo):
+    return {"offering": buffet_data(await dishes.create_buffet(operator.institution_id, data.dish_id, data.quantity))}
+
+
+@router.patch("/buffet/{offering_id}")
+async def update_buffet(offering_id: int, data: BuffetUpdate, operator: Operator, dishes: DishesRepo):
+    return {
+        "offering": buffet_data(
+            await dishes.update_buffet(operator.institution_id, offering_id, data.delta, data.is_visible)
+        )
+    }
+
+
+def menu_now():
+    return datetime.now(UTC)
+
+
 # ---- студент ----
-@router.get("/dishes_tomorrow", response_model=DishTomorrowResponse, summary="Меню на завтра (студент)")
+@router.get("/dishes_tomorrow", response_model=DishTomorrowResponse, summary="Меню на следующий день выдачи")
 async def get_menu_for_tomorrow(student: StudentUser, dishes: DishesRepo):
-    return DishTomorrowResponse(dishes=await dishes.get_menu_for_day(student.institution_id, tomorrow_local()))
+    pickup = next_pickup_day(menu_now(), ZoneInfo(get_settings().timezone))
+    anchor = await dishes.anchor(student.institution_id)
+    try:
+        slot = cycle_slot(anchor, pickup)
+    except ValueError:
+        sets = []
+    else:
+        sets = await dishes.meal_sets(student.institution_id, slot)
+    offerings = await dishes.buffet(student.institution_id, visible_only=True)
+    return DishTomorrowResponse(pickup_date=pickup, dishes=[buffet_data(o) for o in offerings], sets=sets)
 
 
 # ---- поставщик ----
@@ -117,20 +210,12 @@ async def get_plan_for_day(institution_id: int, target_date: date, provider: Pro
 @router.put(
     "/dishes",
     response_model=OkResponse,
-    summary="Задать план на день (поставщик)",
-    description="Количество порций на день. Уже сделанные заказы сохраняются; "
-    "нельзя поставить количество меньше, чем уже заказано.",
+    summary="Планирование поставщиком отключено",
 )
 async def set_plan_for_day(
     institution_id: int, plan: DishPlan, target_date: date, provider: Provider, dishes: DishesRepo
 ):
-    today = today_local()
-    if target_date <= today:
-        raise BadRequestError("You can not assign past dates")
-    if target_date > today + timedelta(days=MAX_PLANNING_DAYS):
-        raise BadRequestError("You can only plan one week ahead")
-    await dishes.set_plan_for_day(institution_id, plan, target_date)
-    return OkResponse()
+    raise ForbiddenError("Daily menu planning is no longer available")
 
 
 # ---- оператор раздачи ----

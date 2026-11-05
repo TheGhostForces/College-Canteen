@@ -6,11 +6,13 @@ from datetime import timedelta
 from sqlalchemy import select
 
 from app.core.config import get_settings
-from app.core.timeutils import today_local, tomorrow_local
+from app.core.timeutils import today_local
 from app.db.models import (
+    BuffetOfferingOrm,
     DishesOrm,
     EducationInstitutionOrm,
-    ScheduleDishesOrm,
+    MealSetComponentOrm,
+    MealSetOrm,
     ShoppingCartOrm,
     StudentsOrm,
     UsersOrm,
@@ -48,8 +50,8 @@ async def seed() -> None:
                         user_id=user.id,
                         full_name="Демонстрационный студент",
                         group_name="ДЕМО-1",
-                        date_start=today_local() - timedelta(days=365),
-                        date_end=today_local() + timedelta(days=365 * 4),
+                        study_start_year=today_local().year - 1,
+                        study_end_year=today_local().year + 4,
                     )
                     session.add(student)
                     await session.flush()
@@ -57,6 +59,11 @@ async def seed() -> None:
                 if cart is None:
                     session.add(ShoppingCartOrm(student_id=student.id))
 
+        if institution.cycle_start_monday is None:
+            today = today_local()
+            institution.cycle_start_monday = today - timedelta(days=today.weekday())
+
+        dishes = {}
         for name, category, price in (
             ("Борщ", "Первое", 120),
             ("Курица с рисом", "Второе", 200),
@@ -70,13 +77,33 @@ async def seed() -> None:
                 dish = DishesOrm(dish_name=name, category=category, fixed_price=price, institution_id=institution.id)
                 session.add(dish)
                 await session.flush()
-            schedule = await session.scalar(
-                select(ScheduleDishesOrm).where(
-                    ScheduleDishesOrm.dish_id == dish.id, ScheduleDishesOrm.date == tomorrow_local()
+            dishes[name] = dish
+
+        for week in (1, 2):
+            for weekday in range(5):
+                meal = await session.scalar(
+                    select(MealSetOrm).where(
+                        MealSetOrm.institution_id == institution.id,
+                        MealSetOrm.cycle_week == week,
+                        MealSetOrm.weekday == weekday,
+                        MealSetOrm.meal_type == "lunch",
+                    )
                 )
-            )
-            if schedule is None and dish.is_active:
-                session.add(ScheduleDishesOrm(dish_id=dish.id, date=tomorrow_local(), quantity=50, total_quantity=50))
+                if meal is None and all(dishes[name].is_active for name in ("Борщ", "Курица с рисом")):
+                    meal = MealSetOrm(
+                        institution_id=institution.id, cycle_week=week, weekday=weekday, meal_type="lunch", price=300
+                    )
+                    meal.components = [
+                        MealSetComponentOrm(dish_id=dishes[name].id, position=position)
+                        for position, name in enumerate(("Борщ", "Курица с рисом"))
+                    ]
+                    session.add(meal)
+
+        for name in ("Чай", "Булочка"):
+            dish = dishes[name]
+            offering = await session.scalar(select(BuffetOfferingOrm).where(BuffetOfferingOrm.dish_id == dish.id))
+            if offering is None and dish.is_active:
+                session.add(BuffetOfferingOrm(dish_id=dish.id, quantity=50, is_visible=True))
 
     print("Демоданные готовы. Вход: student/provider/operator/admin@example.com; коды — в логах приложения.")
 

@@ -1,5 +1,3 @@
-from datetime import date
-
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 from app.db.enums import UserRole
@@ -29,8 +27,8 @@ class UserCreate(BaseModel):
 class StudentCreate(BaseModel):
     full_name: str = Field(min_length=1, max_length=200)
     group_name: str = Field(min_length=1, max_length=50)
-    date_start: date
-    date_end: date
+    study_start_year: int
+    study_end_year: int
 
     @field_validator("full_name", "group_name", mode="before")
     @classmethod
@@ -39,8 +37,8 @@ class StudentCreate(BaseModel):
 
     @model_validator(mode="after")
     def check_dates(self):
-        if self.date_end < self.date_start:
-            raise ValueError("date_end must not be earlier than date_start")
+        if self.study_end_year < self.study_start_year:
+            raise ValueError("study_end_year must not be earlier than study_start_year")
         return self
 
 
@@ -48,8 +46,8 @@ class StudentOut(OrmModel):
     id: int
     full_name: str
     group_name: str
-    date_start: date
-    date_end: date
+    study_start_year: int
+    study_end_year: int
     rating: int
 
 

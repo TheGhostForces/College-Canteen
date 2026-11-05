@@ -4,14 +4,16 @@ import sys
 from app.core.config import Settings
 
 
-def test_database_url_escapes_special_characters():
+def test_database_url_escapes_special_characters(monkeypatch):
+    monkeypatch.delenv("CANTEEN_TEST_PGPASS", raising=False)
     settings = Settings(postgres_password="p@ss/w:rd#1", secret_key="x" * 32, _env_file=None)
     url = settings.database_url
     assert url.password == "p@ss/w:rd#1"
     assert "p@ss/w:rd#1" not in url.render_as_string(hide_password=False)  # в строке подключения экранирован
 
 
-def test_secret_key_must_be_long_enough():
+def test_secret_key_must_be_long_enough(monkeypatch):
+    monkeypatch.delenv("CANTEEN_TEST_PGPASS", raising=False)
     import pytest
     from pydantic import ValidationError
 
